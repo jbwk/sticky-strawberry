@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Background Reference — 390×844</title>
+<style>
+  body { margin: 0; background: #111; display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: sans-serif; color: #aaa; gap: 12px; }
+  canvas { display: block; image-rendering: pixelated; }
+  p { font-size: 13px; }
+</style>
+</head>
+<body>
+<p>Game background — 390 × 844 px (native, no scaling)</p>
+<canvas id="c" width="390" height="844"></canvas>
+<p>Right-click → Save Image As to export at exact game resolution.</p>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const VW = 390, VH = 844;
+
+const C = {
+  nightBg:  '#1a0a2e', nightBg2: '#2d1b4e',
+  wall:     '#f5e6d0', wallDark: '#e8d5b5',
+  pink:     '#ff8fab', lavender: '#C9B1D0',
+  leafDark: '#2D6A4F',
+};
+
+// ── Background gradient ──
+const bg = ctx.createLinearGradient(0, 0, 0, VH);
+bg.addColorStop(0,    C.nightBg);
+bg.addColorStop(0.42, C.nightBg2);
+bg.addColorStop(0.42, C.wall);
+bg.addColorStop(1,    C.wallDark);
+ctx.fillStyle = bg;
+ctx.fillRect(0, 0, VW, VH);
+
+// ── Window ──
+// Frame: x=50, y=30, w=290, h=308  (outer incl. 8px border)
+// Inner glass: x=58, y=38, w=274, h=300
+const wx = 58, wy = 38, ww = 274, wh = 300;
+ctx.fillStyle = '#3a2560';
+roundRect(wx-8, wy-8, ww+16, wh+16, 14); ctx.fill();
+const sky = ctx.createLinearGradient(wx, wy, wx, wy+wh);
+sky.addColorStop(0, '#080415'); sky.addColorStop(1, '#1a0845');
+roundRect(wx, wy, ww, wh, 8); ctx.fillStyle = sky; ctx.fill();
+// Cross bars
+ctx.fillStyle = '#3a2560';
+ctx.fillRect(wx-2, wy+wh/2-4, ww+4, 8);   // horizontal: y=188, h=8
+ctx.fillRect(wx+ww/2-4, wy-2, 8, wh+4);   // vertical:   x=191, w=8
+
+// ── Stars (static snapshot) ──
+const starData = [
+  [80,55,1.2],[120,70,0.8],[160,48,1.5],[200,80,0.9],[240,52,1.3],
+  [280,68,1.1],[100,100,0.7],[145,120,1.4],[185,95,0.8],[230,110,1.2],
+  [270,88,1.0],[88,145,1.3],[130,158,0.7],[175,135,1.5],[220,150,0.9],
+  [260,140,1.1],[95,190,0.8],[140,205,1.3],[180,178,1.0],[225,195,0.7],
+  [265,182,1.4],[85,230,1.1],[128,248,0.8],[170,222,1.2],[215,238,0.9],
+  [258,225,1.3],[92,268,0.7],[135,280,1.5],[178,262,0.8],[222,275,1.1],
+  [263,258,1.0],[110,298,1.3],[158,308,0.9],[205,292,1.4],[250,305,0.7],
+  [73,315,1.2],[195,318,0.8],[300,75,1.0],
+];
+ctx.fillStyle = '#ffffcc';
+starData.forEach(([x, y, r]) => {
+  ctx.save(); ctx.globalAlpha = 0.82;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+});
+
+// ── Moon ──
+// Crescent at x≈296, y=88
+ctx.fillStyle = '#ffd166';
+ctx.beginPath(); ctx.arc(296, 88, 22, 0, Math.PI*2); ctx.fill();
+ctx.fillStyle = '#100430';
+ctx.beginPath(); ctx.arc(307, 85, 18, 0, Math.PI*2); ctx.fill();
+
+// ── Curtains ──
+ctx.fillStyle = C.pink;
+// Left curtain (approx polygon)
+ctx.beginPath();
+ctx.moveTo(50, 30); ctx.lineTo(155, 30);
+ctx.quadraticCurveTo(140, 100, 120, VH*0.43);
+ctx.lineTo(50, VH*0.43); ctx.closePath(); ctx.fill();
+// Right curtain
+ctx.beginPath();
+ctx.moveTo(340, 30); ctx.lineTo(235, 30);
+ctx.quadraticCurveTo(250, 100, 270, VH*0.43);
+ctx.lineTo(340, VH*0.43); ctx.closePath(); ctx.fill();
+// Polka dots
+ctx.globalAlpha = 0.28; ctx.fillStyle = '#fff';
+[[68,55],[72,90],[62,125],[80,62],[75,100]].forEach(([px,py]) => {
+  ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI*2); ctx.fill();
+});
+[[322,55],[318,90],[328,125],[310,62],[315,100]].forEach(([px,py]) => {
+  ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI*2); ctx.fill();
+});
+ctx.globalAlpha = 1;
+
+// ── Bed ──
+// bx=15, by=VH-128=716, bw=360, bh=115
+// Bottom of canvas: y=716 to y=844
+const bx=15, by=VH-128, bw=VW-30, bh=115;
+ctx.fillStyle = '#7c4f2a';
+roundRect(bx-6, by-18, bw+12, 25, 10); ctx.fill();  // headboard: y=698, h=25
+ctx.fillStyle = '#f0e5d0';
+roundRect(bx, by, bw, bh, 10); ctx.fill();            // mattress: y=716, h=115
+ctx.fillStyle = '#c9b1d0';
+roundRect(bx, by+42, bw, bh-42, 10); ctx.fill();      // blanket:  y=758, h=73
+ctx.fillStyle = 'rgba(255,255,255,0.18)';
+for(let i=0;i<5;i++){ roundRect(bx+8+i*68, by+48, 50, bh-54, 6); ctx.fill(); }
+ctx.fillStyle = '#ffd6e0';
+roundRect(bx+28, by+8, 88, 50, 14); ctx.fill();       // pillow:   x=43, y=724, w=88, h=50
+ctx.fillStyle = 'rgba(255,255,255,0.35)';
+roundRect(bx+38, by+16, 68, 8, 4); ctx.fill();
+
+// ── Ceiling strip ──
+ctx.fillStyle = '#ead0b0';
+ctx.fillRect(0, 0, VW, 10);  // y=0, h=10
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+}
+</script>
+</body>
+</html>

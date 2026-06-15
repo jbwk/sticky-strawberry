@@ -1,0 +1,1832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1a0a2e">
+<title>Sticky Strawberry</title>
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Caveat:wght@600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --pink: #ff8fab; --red: #e63946; --cream: #fff8f0;
+    --pale-blue: #a8d8ea; --lavender: #c9b1d0; --night: #1a0a2e;
+  }
+  *, *::before, *::after {
+    margin: 0; padding: 0; box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none;
+  }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: var(--night); touch-action: none;
+  }
+  #wrap {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  canvas { display: block; touch-action: none; }
+  #landscape {
+    position: fixed; inset: 0; background: var(--night);
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center;
+    z-index: 999; color: #fff;
+    font-family: Georgia, serif; text-align: center; padding: 2rem;
+  }
+  #landscape.show { display: flex; }
+  #landscape .icon { font-size: 4rem; margin-bottom: 1rem; }
+  #landscape p { font-size: 1.4rem; color: var(--pink); }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<div id="landscape">
+  <div class="icon">📱</div>
+  <p>Please turn your phone upright to play!</p>
+</div>
+<script>
+'use strict';
+
+// ─────────────────────────────────────────────
+// ASSET MANIFEST  — swap placeholder paths with real files
+// ─────────────────────────────────────────────
+const ASSETS = {
+  images: {
+    background:             'assets/images/background.jpg',
+    strawberry_title:       'assets/images/strawberry_title.png',
+    strawberry_ceiling:     'assets/images/strawberry_ceiling.png',
+    strawberry_tap:         'assets/images/strawberry_tap.png',
+    strawberry_falling:     'assets/images/strawberry_falling.png',
+    strawberry_caught:      'assets/images/strawberry_caught.png',
+    strawberry_celebration: 'assets/images/strawberry_celebration.png',
+    strawberry_bedtime:     'assets/images/strawberry_bedtime.png',
+    snapshot_1:             'assets/images/snapshot_1.jpg',
+    snapshot_2:             'assets/images/snapshot_2.jpg',
+    snapshot_3:             'assets/images/snapshot_3.jpg',
+    pillow:                 'assets/images/pillow.png',
+    basket:                 'assets/images/basket.png',
+    teddybear:              'assets/images/teddybear.png',
+  },
+  audio: {
+    song:             'assets/audio/full_song.mp3',
+    instrumental:     'assets/audio/instrumental_loop.mp3',
+    lyric_01:         'assets/audio/lyric_line_01.mp3',
+    lyric_02:         'assets/audio/lyric_line_02.mp3',
+    lyric_03:         'assets/audio/lyric_line_03.mp3',
+    lyric_04:         'assets/audio/lyric_line_04.mp3',
+    lyric_05:         'assets/audio/lyric_line_05.mp3',
+    lyric_06:         'assets/audio/lyric_line_06.mp3',
+    lyric_07:         'assets/audio/lyric_line_07.mp3',
+    lyric_08:         'assets/audio/lyric_line_08.mp3',
+    tap_squish:       'assets/audio/tap_squish.mp3',
+    sticky_peel:      'assets/audio/sticky_peel.mp3',
+    falling_whistle:  'assets/audio/falling_whistle.mp3',
+    pillow_bounce:    'assets/audio/pillow_bounce.mp3',
+    basket_pop:       'assets/audio/basket_pop.mp3',
+    teddy_hug:        'assets/audio/teddy_hug.mp3',
+    head_boop:        'assets/audio/head_boop.mp3',
+    giggle:           'assets/audio/giggle.mp3',
+    bedtime_chime:    'assets/audio/bedtime_chime.mp3',
+  }
+};
+
+// ─────────────────────────────────────────────
+// LYRICS
+// ─────────────────────────────────────────────
+const LYRICS = [
+  'Sticky strawberry, sticky strawberry',
+  'When will you fall down?',
+  'Sticky strawberry, oh sticky strawberry',
+  'Where will you fall down?',
+  'Will you come down soon?',
+  'Will I be in bed?',
+  'Will I be asleep',
+  'When you hit my head?'
+];
+
+// ─────────────────────────────────────────────
+// CANVAS / SCALE
+// ─────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+const VW = 390, VH = 844;
+let scale = 1, offX = 0, offY = 0;
+
+function resize() {
+  const sw = window.innerWidth / VW;
+  const sh = window.innerHeight / VH;
+  scale = Math.min(sw, sh);
+  canvas.width  = Math.round(VW * scale);
+  canvas.height = Math.round(VH * scale);
+  offX = (window.innerWidth  - canvas.width)  / 2;
+  offY = (window.innerHeight - canvas.height) / 2;
+  canvas.style.cssText = `position:absolute;left:${offX}px;top:${offY}px;width:${canvas.width}px;height:${canvas.height}px`;
+}
+window.addEventListener('resize', () => { resize(); checkOrientation(); });
+resize();
+
+// ─────────────────────────────────────────────
+// ORIENTATION
+// ─────────────────────────────────────────────
+const landEl = document.getElementById('landscape');
+function checkOrientation() {
+  landEl.classList.toggle('show', window.innerWidth > window.innerHeight);
+}
+checkOrientation();
+
+// ─────────────────────────────────────────────
+// INPUT
+// ─────────────────────────────────────────────
+const inp = { pressed: false, x: 0, y: 0, tap: false, tx: 0, ty: 0 };
+
+function toV(cx, cy) { return { x: (cx - offX) / scale, y: (cy - offY) / scale }; }
+
+function titleBerryPos() {
+  // Berry resting position on title screen (used for hit-test and idle draw)
+  return { x: VW/2 + Math.sin(title.wp)*13, y: VH*0.63 + Math.sin(title.wp*0.65)*5 };
+}
+
+function onStart(cx, cy) {
+  const v = toV(cx, cy);
+  inp.pressed = true; inp.x = v.x; inp.y = v.y;
+  audioUnlock();
+  if (volSlider && v.x >= volSlider.x && v.x <= volSlider.x + volSlider.w &&
+      v.y >= volSlider.y && v.y <= volSlider.y + volSlider.h) {
+    volDrag = true;
+    setMusicVol((v.x - volSlider.tx) / volSlider.tw);
+  } else if (state === S.TITLE) {
+    // Check if grabbing the berry (generous radius for small fingers)
+    const bp = titleBerryPos();
+    if (Math.hypot(v.x - bp.x, v.y - bp.y) < berry.r * 1.8) {
+      titleDrag = true;
+      velHist = [{ x: v.x, y: v.y, t: performance.now() }];
+    } else {
+      // Tapped outside berry on title screen — auto-throw as fallback
+      inp.tap = true; inp.tx = v.x; inp.ty = v.y;
+    }
+  } else {
+    inp.tap = true; inp.tx = v.x; inp.ty = v.y;
+  }
+}
+function onMove(cx, cy) {
+  if (!inp.pressed) return;
+  const v = toV(cx, cy);
+  inp.x = v.x; inp.y = v.y;
+  if (volDrag && volSlider) {
+    setMusicVol((v.x - volSlider.tx) / volSlider.tw);
+  }
+  if (titleDrag) {
+    velHist.push({ x: v.x, y: v.y, t: performance.now() });
+    if (velHist.length > 24) velHist.shift();
+  }
+}
+function onEnd() {
+  inp.pressed = false; volDrag = false;
+  if (titleDrag && state === S.TITLE) {
+    titleDrag = false;
+    // Compute release velocity from last ~90ms of movement
+    const now = performance.now();
+    const recent = velHist.filter(h => now - h.t < 90);
+    let rvx = 0, rvy = -1600;
+    if (recent.length >= 2) {
+      const f = recent[0], l = recent[recent.length - 1];
+      const dt = (l.t - f.t) / 1000;
+      if (dt > 0.008) {
+        rvx = (l.x - f.x) / dt;
+        const rawVy = (l.y - f.y) / dt;
+        if (rawVy < -150) rvy = Math.max(-2600, rawVy);
+      }
+    }
+    // Launch from where the finger was
+    const last = velHist[velHist.length - 1] || { x: VW/2, y: VH*0.63 };
+    title.tx    = Math.max(berry.r, Math.min(VW - berry.r, last.x));
+    title.ty    = Math.min(VH * 0.78, last.y);
+    title.tvx   = Math.max(-350, Math.min(350, rvx));
+    title.tvy   = rvy;
+    title.trot  = rvx * 0.0003;
+    title.tphase = 'flying';
+    title.ttime  = 0;
+    title.tsx = 1; title.tsy = 1;
+    startMusic();
+    state = S.THROWING;
+  }
+  titleDrag = false;
+}
+
+canvas.addEventListener('touchstart', e => { e.preventDefault(); const t = e.changedTouches[0]; onStart(t.clientX, t.clientY); }, { passive: false });
+canvas.addEventListener('touchmove',  e => { e.preventDefault(); const t = e.changedTouches[0]; onMove(t.clientX, t.clientY);  }, { passive: false });
+canvas.addEventListener('touchend',   e => { e.preventDefault(); onEnd(); }, { passive: false });
+canvas.addEventListener('mousedown',  e => onStart(e.clientX, e.clientY));
+canvas.addEventListener('mousemove',  e => onMove(e.clientX, e.clientY));
+canvas.addEventListener('mouseup',    onEnd);
+
+// ─────────────────────────────────────────────
+// AUDIO
+// ─────────────────────────────────────────────
+let soundOn = localStorage.getItem('sound') !== 'false';
+let musicVol = parseFloat(localStorage.getItem('musicVol') ?? '0.7');
+let musicStarted = false;
+let audioReady = false;
+const audioEl = {};
+let volSlider = null;   // set each frame by audioControls()
+let volDrag   = false;
+
+function audioUnlock() {
+  if (audioReady) return;
+  audioReady = true;
+  try {
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = ac.createBuffer(1,1,22050);
+    const src = ac.createBufferSource();
+    src.buffer = buf; src.connect(ac.destination); src.start(); ac.close();
+  } catch(e) {}
+}
+
+function loadAudio(key) {
+  const path = ASSETS.audio[key];
+  if (!path) return;
+  const el = new Audio();
+  el.preload = 'auto'; el.src = path;
+  try { el.load(); } catch(e) {}
+  audioEl[key] = el;
+}
+
+function play(key, loop = false, vol = 0.525) {
+  if (!soundOn || !audioReady) return;
+  const el = audioEl[key];
+  if (!el) return;
+  el.loop = loop; el.volume = vol;
+  el.currentTime = 0;
+  el.play().catch(() => {});
+}
+
+function stop(key) {
+  const el = audioEl[key];
+  if (el) { el.pause(); el.currentTime = 0; }
+}
+
+function fadeOut(key, ms = 1200) {
+  const el = audioEl[key];
+  if (!el || el.paused) return;
+  const start = el.volume;
+  let t = 0;
+  const id = setInterval(() => {
+    t += 60;
+    el.volume = Math.max(0, start * (1 - t / ms));
+    if (t >= ms) { clearInterval(id); el.pause(); el.currentTime = 0; el.volume = start; }
+  }, 60);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    Object.values(audioEl).forEach(e => { if (!e.paused) { e._was = true; e.pause(); } });
+  } else if (soundOn) {
+    Object.values(audioEl).forEach(e => { if (e._was) { e.play().catch(()=>{}); e._was = false; } });
+  }
+});
+
+function startMusic() {
+  if (!audioReady || musicStarted) return;
+  musicStarted = true;
+  loadAudio('song');
+  setTimeout(() => {
+    const el = audioEl['song'];
+    if (!el) return;
+    el.loop = true;
+    el.volume = soundOn ? musicVol : 0;
+    el.play().catch(() => {});
+  }, 80);
+}
+
+function setMusicVol(v) {
+  musicVol = Math.max(0, Math.min(1, v));
+  localStorage.setItem('musicVol', musicVol);
+  const el = audioEl['song'];
+  if (el && soundOn) el.volume = musicVol;
+}
+
+// Preload commonly used sounds
+['tap_squish','sticky_peel','falling_whistle','pillow_bounce','basket_pop','teddy_hug','head_boop','giggle','bedtime_chime'].forEach(loadAudio);
+
+// ─────────────────────────────────────────────
+// BACKGROUND IMAGE
+// ─────────────────────────────────────────────
+let bgImg = null;
+(function loadBgImage() {
+  const img = new Image();
+  img.onload = () => { bgImg = img; };
+  img.onerror = () => { bgImg = null; };
+  img.src = ASSETS.images.background;
+})();
+
+// ─────────────────────────────────────────────
+// STRAWBERRY PNG IMAGES
+// ─────────────────────────────────────────────
+const berryImgs = {};
+['strawberry_title','strawberry_ceiling','strawberry_tap','strawberry_falling',
+ 'strawberry_caught','strawberry_celebration','strawberry_bedtime'].forEach(key => {
+  const img = new Image();
+  img.src = ASSETS.images[key];
+  berryImgs[key] = img;
+});
+
+// ─────────────────────────────────────────────
+// CATCHER PNG IMAGES
+// ─────────────────────────────────────────────
+const catcherImgs = {};
+['pillow','basket','teddybear'].forEach(key => {
+  const img = new Image();
+  img.src = ASSETS.images[key];
+  catcherImgs[key] = img;
+});
+
+// ─────────────────────────────────────────────
+// SNAPSHOT IMAGES  (bedtime polaroid)
+// ─────────────────────────────────────────────
+const snapImgs = {};
+['snapshot_1','snapshot_2','snapshot_3'].forEach(key => {
+  const img = new Image();
+  img.src = ASSETS.images[key];
+  snapImgs[key] = img;
+});
+
+// ─────────────────────────────────────────────
+// PALETTE
+// ─────────────────────────────────────────────
+const C = {
+  nightBg: '#1a0a2e', nightBg2: '#2d1b4e',
+  wall: '#f5e6d0', wallDark: '#e8d5b5',
+  // Style-guide palette
+  pink: '#ff8fab', red: '#DC3545', darkRed: '#b01c2a',
+  cream: '#FFF0E0', paleBlue: '#A8C8E8', lavender: '#C9B1D0',
+  blushPink: '#F4A0A8',
+  green: '#52b788', darkGreen: '#2D6A4F',
+  yellow: '#ffd166', orange: '#f4a261',
+  goo: '#FF4D94', star: '#FFE066',
+  brown: '#C8956C', purpleBow: '#9B59B6',
+  leafDark: '#2D6A4F', leafMid: '#52B788',
+};
+
+// Bubbly font helper — use F(size) wherever ctx.font is set
+const F = sz => `${sz}px "Fredoka One", cursive`;
+
+// ─────────────────────────────────────────────
+// GAME STATE ENUM
+// ─────────────────────────────────────────────
+const S = { TITLE:'title', THROWING:'throwing', PLAYING:'playing', FALLING:'falling', LANDING:'landing', CELEBRATION:'celebration', BEDTIME:'bedtime' };
+let state = S.TITLE;
+
+// ─────────────────────────────────────────────
+// REDUCED MOTION
+// ─────────────────────────────────────────────
+const noAnim = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ─────────────────────────────────────────────
+// GAME OBJECTS
+// ─────────────────────────────────────────────
+const berry = {
+  x:0, y:0, bx:0, by:0,           // current & base position
+  r:45,                             // radius
+  wp:0, wa:8,                       // wobble phase & amplitude
+  sx:1, sy:1,                       // squash x/y
+  rot:0, vx:0, vy:0,
+  taps:0, need:4,                   // tap progress
+  glow:0, sqTimer:0,
+  face:{ eo:1, sm:1 },             // eye-open, smile-size
+};
+
+const catcher = {
+  x: VW/2, y: 720,
+  w: 128, hw: 172,                  // visual / hit width
+  h: 52, type:'pillow',
+  bounce:0, hug:false,
+};
+
+let goo = [];        // goo strand objects
+let parts = [];      // particles
+let stars = [];      // background stars
+let uiBtns = [];     // hit-test buttons built each frame
+
+// Celebration
+let celeb = { type:'', showBtns:false, timer:0 };
+
+// Bedtime
+let bed = { dim:0, going:false };
+
+// Sing-along
+let sing = { on:false, line:-1, timer:0, dur:3.2 };
+
+// Title
+let title = { alpha:0, wp:0 };
+let titleDrag = false;   // player is holding the berry on title screen
+let velHist   = [];      // [{x,y,t}] recent positions for throw velocity
+
+// Timing
+let T = 0, dT = 0, lastTs = 0, round = 0;
+
+// ─────────────────────────────────────────────
+// INIT / ROUND SETUP
+// ─────────────────────────────────────────────
+function initStars() {
+  stars = [];
+  // Place stars inside the window area (approx x 60–330, y 45–335)
+  for (let i = 0; i < 38; i++) {
+    stars.push({
+      x: 65 + Math.random() * 260,
+      y: 48 + Math.random() * 275,
+      r: 0.6 + Math.random() * 1.8,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.008 + Math.random() * 0.018,
+    });
+  }
+}
+
+function newRound(throwX, throwRot) {
+  round++;
+  berry.need  = 2 + Math.floor(Math.random() * 9);  // 2–10 taps (surprise!)
+  berry.taps  = 0;
+  berry.bx    = throwX !== undefined
+    ? Math.max(berry.r + 8, Math.min(VW - berry.r - 8, throwX))
+    : VW/2 + (Math.random()-.5)*80;
+  berry.by    = berry.r + 8;  // pressed against the ceiling
+  berry.x     = berry.bx; berry.y = berry.by;
+  berry.wp    = Math.random()*Math.PI*2;
+  berry.wa    = 8; berry.sx = 1; berry.sy = 1;
+  berry.rot   = throwRot || 0; berry.vx = 0; berry.vy = 0;
+  berry.glow  = 0; berry.sqTimer = 0; berry.peeling = false;
+  berry.face  = { eo:1, sm:1 };
+
+  const types = ['pillow','basket','teddy'];
+  catcher.type   = types[round % 3];
+  catcher.x      = VW/2;
+  catcher.bounce = 0;
+  catcher.hug    = false;
+
+  // Build goo strands
+  goo = [];
+  for (let i = 0; i < berry.need; i++) {
+    goo.push({
+      x: berry.bx + (i - (berry.need-1)/2) * 22,
+      broken: false, bt: 0,          // break-time
+    });
+  }
+
+  parts = [];
+  celeb  = { type:'', showBtns:false, timer:0 };
+  state  = S.PLAYING;
+}
+
+// ─────────────────────────────────────────────
+// DRAWING HELPERS
+// ─────────────────────────────────────────────
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+
+// 4-pointed sparkle (✦) matching the style guide's visual effects
+function star5(x, y, r, col, a=1) {
+  ctx.save(); ctx.globalAlpha = a; ctx.fillStyle = col;
+  ctx.beginPath();
+  // Four long points at N/E/S/W, very narrow waist between them
+  const outer = r, inner = r * 0.18;
+  for (let i = 0; i < 8; i++) {
+    const ang = i * Math.PI / 4 - Math.PI / 2;
+    const rad = i % 2 === 0 ? outer : inner;
+    if (i === 0) ctx.moveTo(x + Math.cos(ang)*rad, y + Math.sin(ang)*rad);
+    else          ctx.lineTo(x + Math.cos(ang)*rad, y + Math.sin(ang)*rad);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function shade(hex, d) {
+  const n = parseInt(hex.slice(1),16);
+  const clamp = v => Math.max(0,Math.min(255,v));
+  const r=clamp((n>>16)+d), g=clamp(((n>>8)&0xff)+d), b=clamp((n&0xff)+d);
+  return '#'+((r<<16)|(g<<8)|b).toString(16).padStart(6,'0');
+}
+
+// ─────────────────────────────────────────────
+// BACKGROUND
+// ─────────────────────────────────────────────
+function drawBG() {
+  if (bgImg && bgImg.complete && bgImg.naturalWidth > 0) {
+    // Scale image to cover the full virtual canvas (cover = fill, crop if needed)
+    const iw = bgImg.naturalWidth, ih = bgImg.naturalHeight;
+    const scale = Math.max(VW / iw, VH / ih);
+    const dw = iw * scale, dh = ih * scale;
+    const dx = (VW - dw) / 2, dy = (VH - dh) / 2;
+    ctx.drawImage(bgImg, dx, dy, dw, dh);
+  } else {
+    // Programmatic fallback while image loads (or if file is missing)
+    drawBGFallback();
+  }
+}
+
+function drawBGFallback() {
+  const bg = ctx.createLinearGradient(0,0,0,VH);
+  bg.addColorStop(0,   C.nightBg);
+  bg.addColorStop(0.42,C.nightBg2);
+  bg.addColorStop(0.42,C.wall);
+  bg.addColorStop(1,   C.wallDark);
+  ctx.fillStyle = bg; ctx.fillRect(0,0,VW,VH);
+  drawWindow(); drawStars(); drawMoon(); drawCurtains(); drawBed();
+  ctx.fillStyle = '#ead0b0'; ctx.fillRect(0,0,VW,10);
+}
+
+function drawWindow() {
+  const wx=58, wy=38, ww=274, wh=300;
+  // Frame
+  ctx.fillStyle = '#3a2560';
+  rr(wx-8,wy-8,ww+16,wh+16,14); ctx.fill();
+  // Sky
+  const sky = ctx.createLinearGradient(wx,wy,wx,wy+wh);
+  sky.addColorStop(0,'#080415'); sky.addColorStop(1,'#1a0845');
+  rr(wx,wy,ww,wh,8); ctx.fillStyle=sky; ctx.fill();
+  // Cross bars
+  ctx.fillStyle='#3a2560';
+  ctx.fillRect(wx-2, wy+wh/2-4, ww+4, 8);
+  ctx.fillRect(wx+ww/2-4, wy-2, 8, wh+4);
+}
+
+function drawStars() {
+  stars.forEach(s => {
+    const tw = 0.45 + 0.55*Math.sin(s.phase + T*s.speed*60);
+    ctx.save(); ctx.globalAlpha = tw*0.9;
+    ctx.fillStyle='#ffffcc';
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  });
+}
+
+function drawMoon() {
+  const mx=VW*0.76, my=88;
+  ctx.save();
+  ctx.fillStyle='#ffd166';
+  ctx.beginPath(); ctx.arc(mx,my,22,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#100430';
+  ctx.beginPath(); ctx.arc(mx+11,my-3,18,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawCurtains() {
+  ctx.save();
+  // Left curtain
+  ctx.fillStyle=C.pink;
+  ctx.beginPath();
+  ctx.moveTo(50,30); ctx.lineTo(155,30);
+  ctx.quadraticCurveTo(140,100, 120, VH*0.43);
+  ctx.lineTo(50, VH*0.43); ctx.closePath(); ctx.fill();
+  // Right curtain
+  ctx.beginPath();
+  ctx.moveTo(340,30); ctx.lineTo(235,30);
+  ctx.quadraticCurveTo(250,100, 270, VH*0.43);
+  ctx.lineTo(340,VH*0.43); ctx.closePath(); ctx.fill();
+  // Polka dots
+  ctx.globalAlpha=0.28; ctx.fillStyle='#fff';
+  [[68,55],[72,90],[62,125],[80,62],[75,100]].forEach(([px,py]) => {
+    ctx.beginPath(); ctx.arc(px,py,4,0,Math.PI*2); ctx.fill();
+  });
+  [[322,55],[318,90],[328,125],[310,62],[315,100]].forEach(([px,py]) => {
+    ctx.beginPath(); ctx.arc(px,py,4,0,Math.PI*2); ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawBed() {
+  const bx=15, by=VH-128, bw=VW-30, bh=115;
+  // Headboard
+  ctx.fillStyle='#7c4f2a';
+  rr(bx-6,by-18,bw+12,25,10); ctx.fill();
+  // Mattress
+  ctx.fillStyle='#f0e5d0';
+  rr(bx,by,bw,bh,10); ctx.fill();
+  // Blanket
+  ctx.fillStyle='#c9b1d0';
+  rr(bx,by+42,bw,bh-42,10); ctx.fill();
+  // Blanket texture stripes
+  ctx.fillStyle='rgba(255,255,255,0.18)';
+  for(let i=0;i<5;i++){rr(bx+8+i*68,by+48,50,bh-54,6); ctx.fill();}
+  // Pillow (decorative)
+  ctx.fillStyle='#ffd6e0';
+  rr(bx+28,by+8,88,50,14); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.35)';
+  rr(bx+38,by+16,68,8,4); ctx.fill();
+}
+
+// ─────────────────────────────────────────────
+// STRAWBERRY
+// ─────────────────────────────────────────────
+function drawBerry(x, y, sx, sy, rot, face, glow) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot); ctx.scale(sx, sy);
+  const r = berry.r;
+
+  // Glow halo
+  if (glow > 0) {
+    ctx.save(); ctx.globalAlpha = glow * 0.4;
+    const hg = ctx.createRadialGradient(0,0,r*0.5, 0,0,r+22);
+    hg.addColorStop(0,'#ff8fab'); hg.addColorStop(1,'rgba(255,100,150,0)');
+    ctx.fillStyle = hg;
+    ctx.beginPath(); ctx.arc(0,0,r+22,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+
+  // Drop shadow
+  ctx.save(); ctx.globalAlpha = 0.22;
+  ctx.fillStyle = '#3a0010';
+  ctx.beginPath(); ctx.ellipse(5, r*0.85, r*0.82, r*0.22, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // ── Body: plump round shape slightly pointed at bottom ──
+  // Wide oval top, gently tapering to a soft point at bottom
+  ctx.beginPath();
+  ctx.moveTo(0, r*1.08);                                         // bottom tip
+  ctx.bezierCurveTo( r*0.38, r*1.08,  r*0.96, r*0.55,  r*0.96, -r*0.05);
+  ctx.bezierCurveTo( r*0.96, -r*0.72, r*0.52, -r*0.92, 0,      -r*0.92);
+  ctx.bezierCurveTo(-r*0.52, -r*0.92,-r*0.96, -r*0.72,-r*0.96, -r*0.05);
+  ctx.bezierCurveTo(-r*0.96,  r*0.55,-r*0.38,  r*1.08, 0,       r*1.08);
+  ctx.closePath();
+
+  // Base fill
+  ctx.fillStyle = C.red;
+  ctx.fill();
+
+  // Side shading — darker edges for roundness
+  ctx.save();
+  const sg = ctx.createRadialGradient(r*0.15, -r*0.1, r*0.1, 0, 0, r*1.1);
+  sg.addColorStop(0,  'rgba(255,180,180,0.18)');
+  sg.addColorStop(0.6,'rgba(0,0,0,0)');
+  sg.addColorStop(1,  'rgba(100,0,10,0.38)');
+  ctx.fillStyle = sg;
+  ctx.beginPath();
+  ctx.moveTo(0, r*1.08);
+  ctx.bezierCurveTo( r*0.38, r*1.08,  r*0.96, r*0.55,  r*0.96, -r*0.05);
+  ctx.bezierCurveTo( r*0.96, -r*0.72, r*0.52, -r*0.92, 0,      -r*0.92);
+  ctx.bezierCurveTo(-r*0.52, -r*0.92,-r*0.96, -r*0.72,-r*0.96, -r*0.05);
+  ctx.bezierCurveTo(-r*0.96,  r*0.55,-r*0.38,  r*1.08, 0,       r*1.08);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // Top highlight blob
+  ctx.save(); ctx.globalAlpha = 0.32;
+  const hh = ctx.createRadialGradient(-r*0.25,-r*0.35, 0, -r*0.2,-r*0.25, r*0.55);
+  hh.addColorStop(0,'#ffcccc'); hh.addColorStop(1,'rgba(255,180,180,0)');
+  ctx.fillStyle = hh;
+  ctx.beginPath(); ctx.ellipse(-r*0.22,-r*0.28, r*0.42, r*0.52, -0.3, 0, Math.PI*2);
+  ctx.fill(); ctx.restore();
+
+  // ── Seeds: cream oval dots ──
+  ctx.fillStyle = '#F5E6C8';
+  [[-0.16,0.05],[0.24,-0.08],[-0.12,-0.42],[0.34,0.32],
+   [-0.40,0.36],[0.08,0.60],[-0.32,-0.06],[0.44,0.08],[0.02,0.26]].forEach(([dx,dy]) => {
+    ctx.save(); ctx.translate(dx*r, dy*r); ctx.rotate(0.25);
+    ctx.beginPath(); ctx.ellipse(0,0,3,4.5,0,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  });
+
+  // ── Leaves / calyx ──
+  drawCalyx(r);
+
+  ctx.restore();
+}
+
+// PNG-based berry renderer — falls back to canvas drawBerry if image not ready
+function drawBerryPng(x, y, sx, sy, rot, glow, imgKey) {
+  const img = berryImgs[imgKey];
+  const r = berry.r;
+  if (!img || !img.complete || !img.naturalWidth) {
+    // Image not loaded yet — use canvas fallback
+    drawBerry(x, y, sx, sy, rot, berry.face, glow);
+    return;
+  }
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(rot); ctx.scale(sx, sy);
+  if (glow > 0) {
+    ctx.save(); ctx.globalAlpha = glow * 0.45;
+    const hg = ctx.createRadialGradient(0, 0, r*0.5, 0, 0, r+22);
+    hg.addColorStop(0, '#ff8fab'); hg.addColorStop(1, 'rgba(255,100,150,0)');
+    ctx.fillStyle = hg;
+    ctx.beginPath(); ctx.arc(0, 0, r+22, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  }
+  ctx.drawImage(img, -r, -r, r*2, r*2);
+  ctx.restore();
+}
+
+// Five overlapping pointed leaves fanning from the top
+function drawCalyx(r) {
+  const base = -r * 0.86;
+  // Leaf definitions: [angle-offset, length, width-factor]
+  const leaves = [
+    [-0.65, r*0.72, 0.22],
+    [-0.28, r*0.82, 0.24],
+    [ 0.05, r*0.80, 0.25],
+    [ 0.38, r*0.78, 0.23],
+    [ 0.70, r*0.68, 0.20],
+  ];
+  leaves.forEach(([ao, len, wf]) => {
+    ctx.save(); ctx.rotate(ao);
+    ctx.fillStyle = C.leafDark;
+    ctx.beginPath();
+    ctx.moveTo(0, base);
+    ctx.bezierCurveTo( r*wf, base - len*0.4,  r*wf*0.5, base - len*0.85, 0, base - len);
+    ctx.bezierCurveTo(-r*wf*0.5, base - len*0.85, -r*wf, base - len*0.4, 0, base);
+    ctx.closePath(); ctx.fill();
+    // Lighter midrib highlight
+    ctx.strokeStyle = C.leafMid; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0, base);
+    ctx.quadraticCurveTo(r*wf*0.1, base - len*0.5, 0, base - len);
+    ctx.stroke();
+    ctx.restore();
+  });
+  // Green calyx centre knob
+  ctx.fillStyle = C.leafMid;
+  ctx.beginPath(); ctx.arc(0, base, r*0.14, 0, Math.PI*2); ctx.fill();
+  // Tiny stem
+  ctx.strokeStyle = C.leafDark; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(0, base); ctx.lineTo(0, base - r*0.22); ctx.stroke();
+}
+
+// Big kawaii eyes matching the style guide
+function drawFace(r, f) {
+  const eyeY  = -r * 0.08;
+  const eyeX  =  r * 0.30;
+  const irisR =  r * 0.195;   // large brown iris
+
+  // ── Eyebrows (thin arcs) ──
+  ctx.save();
+  ctx.strokeStyle = '#3a1a08'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(-eyeX, eyeY - irisR * 1.3, irisR * 1.0, Math.PI + 0.45, Math.PI*2 - 0.45);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc( eyeX, eyeY - irisR * 1.3, irisR * 1.0, Math.PI + 0.45, Math.PI*2 - 0.45);
+  ctx.stroke();
+  ctx.restore();
+
+  // ── Eyes: draw as separate left/right ──
+  [-eyeX, eyeX].forEach(ex => {
+    if (f.eo < 0.25) {
+      // Sleepy: closed arc (half-moon)
+      ctx.save();
+      ctx.strokeStyle = '#3a1a08'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(ex, eyeY, irisR, Math.PI, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+    } else {
+      // White of eye
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.ellipse(ex, eyeY, irisR*1.08, irisR*(0.88 + f.eo*0.12), 0, 0, Math.PI*2); ctx.fill();
+      // Brown iris
+      ctx.fillStyle = '#6B3A2A';
+      ctx.beginPath(); ctx.ellipse(ex, eyeY, irisR*f.eo, irisR*f.eo, 0, 0, Math.PI*2); ctx.fill();
+      // Dark pupil
+      ctx.fillStyle = '#1a0808';
+      ctx.beginPath(); ctx.arc(ex, eyeY, irisR*0.48*f.eo, 0, Math.PI*2); ctx.fill();
+      // Main white highlight (upper-right of iris)
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.ellipse(ex + irisR*0.28, eyeY - irisR*0.30, irisR*0.30, irisR*0.24, -0.4, 0, Math.PI*2); ctx.fill();
+      // Secondary tiny sparkle dot
+      ctx.beginPath(); ctx.arc(ex - irisR*0.22, eyeY + irisR*0.18, irisR*0.12, 0, Math.PI*2); ctx.fill();
+    }
+  });
+
+  // ── Mouth ──
+  const mouthY = r * 0.42;
+  ctx.strokeStyle = '#3a1a08'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  if (f.sm >= 1.25) {
+    // Laughing: open mouth with teeth
+    ctx.fillStyle = '#3a1a08';
+    ctx.beginPath(); ctx.ellipse(0, mouthY, r*0.26, r*0.16, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.ellipse(0, mouthY - r*0.02, r*0.21, r*0.09, 0, 0, Math.PI); ctx.fill();
+  } else if (f.sm <= 0.55) {
+    // Sad/sleepy tiny frown
+    ctx.beginPath(); ctx.arc(0, mouthY + r*0.1, r*0.14, Math.PI + 0.35, Math.PI*2 - 0.35); ctx.stroke();
+  } else {
+    // Happy smile arc
+    ctx.beginPath();
+    ctx.arc(0, mouthY - r*0.06, r*0.22, 0.2, Math.PI - 0.2);
+    ctx.stroke();
+  }
+
+  // ── Cheeks ──
+  ctx.fillStyle = C.blushPink;
+  ctx.save(); ctx.globalAlpha = 0.55;
+  ctx.beginPath(); ctx.ellipse(-eyeX*1.55, mouthY - r*0.05, r*0.20, r*0.11, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( eyeX*1.55, mouthY - r*0.05, r*0.20, r*0.11, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────
+// GOO STRANDS  — thick dripping shapes like the style guide
+// ─────────────────────────────────────────────
+function drawGoo() {
+  if (state !== S.PLAYING) return;
+  const top = berry.y - berry.r * berry.sy * 0.88;
+
+  goo.forEach((s, i) => {
+    if (s.broken) {
+      const p = Math.min(1, (T - s.bt) / 0.5);
+      if (p >= 1) return;
+      ctx.save(); ctx.globalAlpha = (1 - p) * 0.85;
+      // Upper piece falls back to ceiling, lower piece stays
+      const midY = top * 0.45;
+      drawGooStrand(s.x, 4,    s.x, midY * (1 - p * 0.6), 8, 3);
+      drawGooStrand(s.x, top,  s.x, top - (top - midY) * p * 0.5, 3, 8);
+      ctx.restore();
+      return;
+    }
+
+    const wobble = Math.sin(T * 2.8 + i * 1.7) * 5;
+    const bx2 = berry.x + (s.x - berry.bx) * 0.28;
+    const strandW = 10 - i * 0.8;   // strands get slightly thinner toward outside
+    const dripLen = 14 + Math.sin(T * 1.5 + i) * 4;
+
+    ctx.save();
+    // Main filled strand shape
+    ctx.fillStyle = C.goo;
+    ctx.shadowBlur = 6; ctx.shadowColor = '#ff1a7a';
+    drawGooStrand(s.x + wobble * 0.3, 2, bx2 + wobble, top, strandW, strandW * 0.7);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Centre highlight stripe
+    ctx.save(); ctx.globalAlpha = 0.30; ctx.fillStyle = '#ffaacc';
+    drawGooStrand(s.x + wobble * 0.3 - strandW*0.15, 2,
+                  bx2 + wobble - strandW*0.15, top, strandW * 0.32, strandW * 0.2);
+    ctx.fill(); ctx.restore();
+
+    // Drip blob at bottom
+    ctx.fillStyle = C.goo;
+    ctx.beginPath(); ctx.arc(bx2 + wobble, top + dripLen * 0.55, strandW * 0.75, 0, Math.PI*2); ctx.fill();
+    // Tiny satellite drip dots
+    ctx.save(); ctx.globalAlpha = 0.65;
+    ctx.beginPath(); ctx.arc(bx2 + wobble + strandW, top + dripLen * 0.3, strandW * 0.28, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx2 + wobble - strandW * 0.8, top + dripLen * 0.2, strandW * 0.22, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+
+    ctx.restore();
+  });
+}
+
+// Draw a filled tapered strand from (x1,y1) to (x2,y2) with given half-widths
+function drawGooStrand(x1, y1, x2, y2, w1, w2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len, ny = dx / len; // normal
+  ctx.beginPath();
+  ctx.moveTo(x1 + nx*w1, y1 + ny*w1);
+  ctx.bezierCurveTo(
+    x1 + nx*w1 + dx*0.35, y1 + ny*w1 + dy*0.35,
+    x2 + nx*w2 + dx*(-0.1), y2 + ny*w2 + dy*(-0.1),
+    x2 + nx*w2, y2 + ny*w2
+  );
+  ctx.lineTo(x2 - nx*w2, y2 - ny*w2);
+  ctx.bezierCurveTo(
+    x2 - nx*w2 + dx*(-0.1), y2 - ny*w2 + dy*(-0.1),
+    x1 - nx*w1 + dx*0.35,   y1 - ny*w1 + dy*0.35,
+    x1 - nx*w1, y1 - ny*w1
+  );
+  ctx.closePath();
+}
+
+// ─────────────────────────────────────────────
+// CATCHER DRAWERS
+// ─────────────────────────────────────────────
+// Draw rects for each catcher type (in translated context where 0,0 = catcher anchor)
+// Anchor is the centre of the catch surface — berry lands at y = -catcher.h/2
+const CATCHER_RECTS = {
+  pillow:   { key:'pillow',    x:-100, y:-50,  w:200, h:100  },
+  basket:   { key:'basket',    x:-100, y:-90,  w:200, h:140  },
+  teddy:    { key:'teddybear', x:-90,  y:-130, w:180, h:170  },
+};
+
+function drawCatcher() {
+  ctx.save();
+  ctx.translate(catcher.x, catcher.y + Math.sin(catcher.bounce) * 7);
+
+  const def = CATCHER_RECTS[catcher.type];
+  const img = def && catcherImgs[def.key];
+  if (img && img.complete && img.naturalWidth) {
+    ctx.drawImage(img, def.x, def.y, def.w, def.h);
+  } else {
+    // Canvas fallback while PNG is loading (or missing)
+    if      (catcher.type === 'pillow') drawPillow();
+    else if (catcher.type === 'basket') drawBasket();
+    else                                drawTeddy();
+  }
+
+  ctx.restore();
+}
+
+function drawPillow() {
+  const hw = catcher.w / 2, hh = catcher.h / 2;
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.16)';
+  ctx.beginPath(); ctx.ellipse(0, hh + 6, hw * 0.85, 8, 0, 0, Math.PI*2); ctx.fill();
+
+  // Puffy body — slightly inflated by layering two rects
+  const puff = 6;
+  ctx.fillStyle = '#e8929e';
+  rr(-hw - puff, -hh + puff, catcher.w + puff*2, catcher.h, 28); ctx.fill();
+
+  const bg = ctx.createLinearGradient(0, -hh, 0, hh);
+  bg.addColorStop(0, '#ffc2cc'); bg.addColorStop(0.5, C.blushPink); bg.addColorStop(1, '#e8929e');
+  ctx.fillStyle = bg;
+  rr(-hw, -hh, catcher.w, catcher.h, 24); ctx.fill();
+
+  // Lighter centre highlight (puffy centre)
+  ctx.save(); ctx.globalAlpha = 0.45;
+  const cg = ctx.createRadialGradient(0, -hh*0.2, 0, 0, 0, hw * 0.7);
+  cg.addColorStop(0, '#fff0f3'); cg.addColorStop(1, 'rgba(255,230,235,0)');
+  ctx.fillStyle = cg;
+  rr(-hw + 8, -hh + 5, catcher.w - 16, catcher.h - 10, 18); ctx.fill();
+  ctx.restore();
+
+  // Polka dots (cream/white)
+  ctx.fillStyle = 'rgba(255,255,255,0.72)';
+  [[-38,-8,7],[18,-12,6],[42,4,5],[-14,10,6],[28,12,5],[-50,8,4]].forEach(([dx,dy,dr]) => {
+    ctx.beginPath(); ctx.arc(dx, dy, dr, 0, Math.PI*2); ctx.fill();
+  });
+
+  // Soft border
+  ctx.strokeStyle = '#d4788a'; ctx.lineWidth = 1.5;
+  rr(-hw, -hh, catcher.w, catcher.h, 24); ctx.stroke();
+}
+
+function drawBasket() {
+  const hw = catcher.w / 2, hh = catcher.h / 2;
+  const tan = '#C8A97E', dk = '#8B6340', mid = '#A8844E';
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.16)';
+  ctx.beginPath(); ctx.ellipse(0, hh + 5, hw * 0.78, 7, 0, 0, Math.PI*2); ctx.fill();
+
+  // Arched handle
+  ctx.save();
+  ctx.strokeStyle = dk; ctx.lineWidth = 7; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(0, -hh - 2, hw * 0.58, Math.PI, Math.PI*2);
+  ctx.stroke();
+  ctx.strokeStyle = mid; ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(0, -hh - 2, hw * 0.58, Math.PI, Math.PI*2);
+  ctx.stroke();
+  ctx.restore();
+
+  // Body — trapezoid
+  ctx.fillStyle = tan;
+  ctx.beginPath();
+  ctx.moveTo(-hw, -hh); ctx.lineTo(hw, -hh);
+  ctx.lineTo(hw * 0.84, hh); ctx.lineTo(-hw * 0.84, hh);
+  ctx.closePath(); ctx.fill();
+
+  // Wicker weave
+  ctx.strokeStyle = dk; ctx.lineWidth = 1.5;
+  // Horizontal rails
+  for (let row = 1; row <= 3; row++) {
+    const ry = -hh + row * (catcher.h / 4);
+    const shrink = (row / 4) * (hw - hw * 0.84);
+    ctx.beginPath(); ctx.moveTo(-hw + shrink, ry); ctx.lineTo(hw - shrink, ry); ctx.stroke();
+  }
+  // Diagonal weave lines
+  ctx.strokeStyle = mid; ctx.lineWidth = 1;
+  for (let col = -5; col <= 5; col++) {
+    ctx.beginPath();
+    ctx.moveTo(col * (hw / 4.5), -hh);
+    ctx.lineTo(col * (hw * 0.84 / 4.5), hh);
+    ctx.stroke();
+  }
+
+  // Rim
+  ctx.fillStyle = mid;
+  rr(-hw - 3, -hh - 7, catcher.w + 6, 12, 6); ctx.fill();
+  ctx.strokeStyle = dk; ctx.lineWidth = 1.5;
+  rr(-hw - 3, -hh - 7, catcher.w + 6, 12, 6); ctx.stroke();
+
+  // Toys peeking out the top
+  // Yellow star toy
+  ctx.save(); ctx.translate(-hw * 0.35, -hh + 2);
+  star5(0, 0, 11, '#FFD166', 1);
+  ctx.restore();
+  // Small red block
+  ctx.fillStyle = '#e63946';
+  rr(hw * 0.12, -hh - 2, 16, 14, 3); ctx.fill();
+  ctx.fillStyle = '#ffb703';
+  rr(hw * 0.14, -hh, 12, 4, 2); ctx.fill();
+  // Purple star toy
+  ctx.save(); ctx.translate(hw * 0.5, -hh + 3);
+  star5(0, 0, 9, C.lavender, 1);
+  ctx.restore();
+}
+
+function drawTeddy() {
+  const sc = catcher.h * 1.6;  // scale — teddy is taller than the hit-box
+  const tc = '#C8956C', belly = '#E8C09A', dk = '#8B5E3C';
+  const armA = catcher.hug ? -1.0 : 0.32;
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.16)';
+  ctx.beginPath(); ctx.ellipse(0, sc * 0.42, sc * 0.36, 7, 0, 0, Math.PI*2); ctx.fill();
+
+  // ── Arms (draw behind body) ──
+  [[-1, 1]].forEach(([side]) => {
+    const ax = side * sc * 0.34;
+    ctx.save(); ctx.translate(ax, sc * 0.02); ctx.rotate(side * armA);
+    ctx.fillStyle = tc;
+    ctx.beginPath(); ctx.ellipse(0, sc * 0.14, sc * 0.10, sc * 0.22, 0, 0, Math.PI*2); ctx.fill();
+    // Paw
+    ctx.fillStyle = belly;
+    ctx.beginPath(); ctx.ellipse(0, sc * 0.30, sc * 0.09, sc * 0.08, 0, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
+  });
+  // Right arm
+  ctx.save(); ctx.translate(sc * 0.34, sc * 0.02); ctx.rotate(-armA);
+  ctx.fillStyle = tc;
+  ctx.beginPath(); ctx.ellipse(0, sc * 0.14, sc * 0.10, sc * 0.22, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = belly;
+  ctx.beginPath(); ctx.ellipse(0, sc * 0.30, sc * 0.09, sc * 0.08, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // ── Body ──
+  ctx.fillStyle = tc;
+  ctx.beginPath(); ctx.ellipse(0, sc * 0.1, sc * 0.32, sc * 0.36, 0, 0, Math.PI*2); ctx.fill();
+  // Belly
+  ctx.fillStyle = belly;
+  ctx.beginPath(); ctx.ellipse(0, sc * 0.12, sc * 0.20, sc * 0.24, 0, 0, Math.PI*2); ctx.fill();
+
+  // ── Legs / feet ──
+  ctx.fillStyle = tc;
+  ctx.beginPath(); ctx.ellipse(-sc * 0.16, sc * 0.38, sc * 0.11, sc * 0.09, -0.3, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( sc * 0.16, sc * 0.38, sc * 0.11, sc * 0.09,  0.3, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = belly;
+  ctx.beginPath(); ctx.ellipse(-sc * 0.17, sc * 0.41, sc * 0.08, sc * 0.06, -0.3, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( sc * 0.17, sc * 0.41, sc * 0.08, sc * 0.06,  0.3, 0, Math.PI*2); ctx.fill();
+
+  // ── Purple bow tie ──
+  ctx.save(); ctx.translate(0, -sc * 0.10);
+  // Left wing
+  ctx.fillStyle = C.purpleBow;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.bezierCurveTo(-sc*0.04, -sc*0.05, -sc*0.18, -sc*0.05, -sc*0.18, 0);
+  ctx.bezierCurveTo(-sc*0.18, sc*0.05, -sc*0.04, sc*0.05, 0, 0);
+  ctx.fill();
+  // Right wing
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.bezierCurveTo(sc*0.04, -sc*0.05, sc*0.18, -sc*0.05, sc*0.18, 0);
+  ctx.bezierCurveTo(sc*0.18, sc*0.05, sc*0.04, sc*0.05, 0, 0);
+  ctx.fill();
+  // Centre knot
+  ctx.fillStyle = shade(C.purpleBow, -30);
+  ctx.beginPath(); ctx.ellipse(0, 0, sc*0.04, sc*0.04, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // ── Head ──
+  ctx.fillStyle = tc;
+  ctx.beginPath(); ctx.arc(0, -sc * 0.34, sc * 0.24, 0, Math.PI*2); ctx.fill();
+
+  // Ears
+  [[-sc*0.19, -sc*0.54], [sc*0.19, -sc*0.54]].forEach(([ex, ey]) => {
+    ctx.fillStyle = tc;
+    ctx.beginPath(); ctx.arc(ex, ey, sc * 0.10, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#e8b0a0';
+    ctx.beginPath(); ctx.arc(ex, ey, sc * 0.06, 0, Math.PI*2); ctx.fill();
+  });
+
+  // Face
+  ctx.fillStyle = '#2a0808';
+  ctx.beginPath(); ctx.arc(-sc*0.09, -sc*0.37, sc*0.038, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc( sc*0.09, -sc*0.37, sc*0.038, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = dk;
+  ctx.beginPath(); ctx.ellipse(0, -sc*0.30, sc*0.038, sc*0.028, 0, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = dk; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(0, -sc*0.26, sc*0.07, 0.25, Math.PI - 0.25); ctx.stroke();
+  // Cheeks
+  ctx.fillStyle = '#e8b0a0'; ctx.globalAlpha = 0.6;
+  ctx.beginPath(); ctx.ellipse(-sc*0.15, -sc*0.30, sc*0.07, sc*0.04, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse( sc*0.15, -sc*0.30, sc*0.07, sc*0.04, 0, 0, Math.PI*2); ctx.fill();
+  ctx.globalAlpha = 1;
+}
+
+// ─────────────────────────────────────────────
+// PARTICLES
+// ─────────────────────────────────────────────
+function spawnJuice(x, y) {
+  const cols=['#ff6b9d','#ff8fab','#ffb3c6','#ffa0be','#ff4081'];
+  for(let i=0;i<8;i++){
+    const a=Math.random()*Math.PI*2, sp=1.2+Math.random()*3;
+    parts.push({ t:'dot', x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-2.2,
+      r:3.5+Math.random()*4, col:cols[i%cols.length], life:1, dec:0.026+Math.random()*0.01 });
+  }
+  for(let i=0;i<3;i++){
+    parts.push({ t:'star5', x:x+(Math.random()-.5)*44, y:y+(Math.random()-.5)*44,
+      vx:(Math.random()-.5)*1.4, vy:-1-Math.random()*2, r:6+Math.random()*4,
+      col:C.star, life:1, dec:0.022, rot:0, rs:0 });
+  }
+}
+
+function spawnConfetti(x, y, n=22) {
+  const cols=[C.pink,C.red,C.yellow,C.lavender,C.paleBlue,C.green,C.orange,'#ffffff'];
+  for(let i=0;i<n;i++){
+    const a=-Math.PI/2+(Math.random()-.5)*Math.PI, sp=3+Math.random()*5;
+    parts.push({ t:'rect', x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp,
+      r:5+Math.random()*5, col:cols[i%cols.length], life:1,
+      dec:0.007+Math.random()*0.005, rot:Math.random()*Math.PI*2, rs:(Math.random()-.5)*0.18 });
+  }
+}
+
+function spawnStars(x,y) {
+  for(let i=0;i<6;i++){
+    const a=(i/6)*Math.PI*2;
+    parts.push({ t:'star5', x:x+Math.cos(a)*28, y:y+Math.sin(a)*28,
+      vx:Math.cos(a)*1.6, vy:Math.sin(a)*1.6-1,
+      r:8+Math.random()*4, col:C.star, life:1, dec:0.013, rot:0, rs:0 });
+  }
+}
+
+function updateDrawParticles() {
+  parts = parts.filter(p => p.life > 0);
+  parts.forEach(p => {
+    ctx.save(); ctx.globalAlpha = p.life;
+    if (p.t==='dot') {
+      ctx.fillStyle=p.col; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
+    } else if (p.t==='star5') {
+      star5(p.x,p.y,p.r,p.col,p.life);
+    } else if (p.t==='rect') {
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
+      ctx.fillStyle=p.col; ctx.fillRect(-p.r,-p.r*0.5,p.r*2,p.r); ctx.restore();
+    }
+    ctx.restore();
+    p.x+=p.vx*dT*60; p.y+=p.vy*dT*60;
+    p.vy+=0.12*dT*60;
+    p.life-=p.dec*dT*60;
+    p.r=Math.max(0,p.r-0.04*dT*60);
+    if(p.t==='rect'){ p.rot+=p.rs*dT*60; p.vx*=0.99; }
+  });
+}
+
+// ─────────────────────────────────────────────
+// UI BUTTONS
+// ─────────────────────────────────────────────
+// iOS-style rounded-square button matching the style guide
+function btn(x, y, w, h, label, bg, fg, id, alpha=1) {
+  const hw=w/2, hh=h/2;
+  // Corner radius ~22% of the smaller dimension (squircle feel)
+  const cr = Math.min(w, h) * 0.28;
+  ctx.save(); ctx.globalAlpha = alpha;
+
+  // Drop shadow
+  ctx.save(); ctx.globalAlpha = alpha * 0.35;
+  ctx.fillStyle = '#000';
+  rr(x-hw+2, y-hh+5, w, h, cr); ctx.fill();
+  ctx.restore();
+
+  // Body gradient (lighter top → darker bottom)
+  const g = ctx.createLinearGradient(x, y-hh, x, y+hh);
+  g.addColorStop(0,   shade(bg, 28));
+  g.addColorStop(0.5, bg);
+  g.addColorStop(1,   shade(bg, -30));
+  ctx.fillStyle = g;
+  rr(x-hw, y-hh, w, h, cr); ctx.fill();
+
+  // Top gloss strip
+  ctx.save(); ctx.globalAlpha = alpha * 0.28;
+  ctx.fillStyle = '#fff';
+  rr(x-hw+4, y-hh+4, w-8, h*0.38, cr*0.8); ctx.fill();
+  ctx.restore();
+
+  // Subtle border
+  ctx.strokeStyle = shade(bg, -40); ctx.lineWidth = 1.5;
+  rr(x-hw, y-hh, w, h, cr); ctx.stroke();
+
+  // Label
+  ctx.fillStyle = fg;
+  ctx.font = F(22);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  // Slight text shadow for legibility
+  ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 2;
+  ctx.fillText(label, x, y);
+  ctx.restore();
+
+  uiBtns.push({id, x:x-hw, y:y-hh, w, h});
+}
+
+function audioControls() {
+  ctx.save();
+
+  // Controls sit at the bottom centre, above the home-indicator safe area
+  const cy  = VH - 40;   // vertical centre of the controls row
+  const r   = 24;        // mute button radius
+  const gap = 14;        // gap between slider and button
+  const slW = 140;       // slider track width
+  const slH = 8;
+  // Layout: [slider] gap [button]
+  // Total width = slW + gap + r*2 = 140+14+48 = 202; centred at VW/2
+  const totalW = slW + gap + r * 2;
+  const rowLeft = (VW - totalW) / 2;
+  const slX  = rowLeft;              // slider track left x
+  const btnX = rowLeft + slW + gap + r;  // button centre x
+
+  // ── pill track background ──
+  ctx.fillStyle = 'rgba(20,8,50,0.60)';
+  ctx.beginPath(); ctx.roundRect(slX, cy - slH/2, slW, slH, slH/2); ctx.fill();
+
+  // ── colored fill ──
+  const fillW = slW * musicVol;
+  if (fillW > slH) {
+    ctx.fillStyle = C.pink;
+    ctx.beginPath(); ctx.roundRect(slX, cy - slH/2, fillW, slH, slH/2); ctx.fill();
+  }
+
+  // ── thumb ──
+  const thumbX = slX + slW * musicVol;
+  ctx.shadowBlur = 6; ctx.shadowColor = 'rgba(0,0,0,0.45)';
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.arc(thumbX, cy, 11, 0, Math.PI*2); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // store bounds for drag (generous hit area)
+  volSlider = { x: slX - 12, y: cy - 22, w: slW + 24, h: 44, tx: slX, tw: slW };
+
+  // ── mute/unmute button ──
+  ctx.fillStyle = 'rgba(20,8,50,0.78)';
+  ctx.beginPath(); ctx.arc(btnX, cy, r, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = C.lavender; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(btnX, cy, r, 0, Math.PI*2); ctx.stroke();
+  ctx.font = F(18); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(soundOn ? '🔊' : '🔇', btnX, cy);
+
+  ctx.restore();
+  uiBtns.push({id:'sound', x: btnX-r, y: cy-r, w: r*2, h: r*2});
+}
+
+function hitBtns(tx, ty) {
+  for(const b of uiBtns){
+    if(tx>=b.x&&tx<=b.x+b.w&&ty>=b.y&&ty<=b.y+b.h){
+      doBtn(b.id); return true;
+    }
+  }
+  return false;
+}
+
+function doBtn(id) {
+  switch(id){
+    case 'play':    startThrow(); break;
+    case 'again':   startThrow(); break;
+    case 'bedtime': startBedtime(); break;
+    case 'replay':  state=S.TITLE; title.alpha=0; break;
+    case 'sound':
+      soundOn = !soundOn;
+      localStorage.setItem('sound', soundOn);
+      if (!soundOn) {
+        Object.values(audioEl).forEach(e => { try { e.pause(); } catch(e2) {} });
+      } else {
+        // Only resume song if the game has already started it — otherwise startMusic() will do it
+        const song = audioEl['song'];
+        if (song && musicStarted) { song.volume = musicVol; song.play().catch(() => {}); }
+      }
+      break;
+  }
+}
+
+// ─────────────────────────────────────────────
+// THROW ANIMATION  (title → playing transition)
+// ─────────────────────────────────────────────
+// Stored on the title object to avoid extra globals
+// title.tx/ty  — berry position during throw
+// title.tvx/tvy — velocity
+// title.trot   — rotation
+// title.tphase — 'flying' | 'squash'
+// title.tsq    — squash timer (frames)
+
+function startThrow() {
+  startMusic();
+  const bp     = titleBerryPos();
+  title.tx     = bp.x;
+  title.ty     = bp.y;
+  title.startY = title.ty;
+  title.tvx    = (Math.random()-0.5)*80;  // px/s horizontal drift
+  title.tvy    = 0;
+  title.trot   = Math.sin(title.wp*1.1)*0.09;
+  title.tphase = 'dip';   // small dip before the upward throw
+  title.ttime  = 0;
+  title.tsx    = 1;
+  title.tsy    = 1;
+  state = S.THROWING;
+}
+
+function updateThrow() {
+  title.ttime += dT;
+
+  if (title.tphase === 'dip') {
+    // Smooth ease-down arc over 0.12s — berry dips ~30px then springs back to start
+    const p = Math.min(1, title.ttime / 0.12);
+    title.ty = title.startY + Math.sin(p * Math.PI) * 30;
+    if (p >= 1) {
+      title.tphase = 'flying';
+      title.ttime  = 0;
+      title.ty     = title.startY;
+      title.tvy    = -1600;  // px/s — strong enough to clear 350px to ceiling
+    }
+
+  } else if (title.tphase === 'flying') {
+    title.tvy  += 1900 * dT;              // gravity px/s²
+    title.tvx  *= Math.pow(0.97, dT*60);
+    title.tx   += title.tvx * dT;
+    title.ty   += title.tvy * dT;
+    title.trot += title.tvx * 0.0006 * dT * 60;
+
+    const ceilY = berry.r + 8;
+    if (title.ty <= ceilY) {
+      title.ty     = ceilY;
+      title.tphase = 'squash';
+      title.ttime  = 0;
+      play('tap_squish');
+      spawnJuice(title.tx, title.ty + berry.r);
+    }
+
+  } else if (title.tphase === 'squash') {
+    // Damped spring: wide squash → brief stretch → settle
+    const p     = Math.min(1, title.ttime / 0.45);
+    const decay = 1 - p;
+    title.tsx = 1 + 0.50 * decay * Math.cos(p * Math.PI * 3.5);
+    title.tsy = 1 - 0.38 * decay * Math.cos(p * Math.PI * 3.5);
+    if (p >= 1) newRound(title.tx, title.trot);
+  }
+}
+
+function drawThrow() {
+  drawBG();
+  drawBerryPng(title.tx, title.ty, title.tsx, title.tsy, title.trot, 0, 'strawberry_ceiling');
+  updateDrawParticles();
+  audioControls();
+}
+
+// ─────────────────────────────────────────────
+// TITLE SCREEN
+// ─────────────────────────────────────────────
+function drawTitle() {
+  title.alpha = Math.min(1, title.alpha + dT*2);
+  title.wp += dT * 1.7;
+  ctx.save(); ctx.globalAlpha = title.alpha;
+
+  drawBG();
+
+  // Title text
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowBlur = 22; ctx.shadowColor = 'rgba(255,100,130,0.65)';
+  ctx.font = F(56);
+  ctx.strokeStyle = C.pink; ctx.lineWidth = 7; ctx.lineJoin = 'round';
+  ctx.strokeText('Sticky', VW/2, VH*0.145);
+  ctx.strokeText('Strawberry', VW/2, VH*0.225);
+  ctx.fillStyle = '#fff';
+  ctx.fillText('Sticky', VW/2, VH*0.145);
+  ctx.fillText('Strawberry', VW/2, VH*0.225);
+  ctx.shadowBlur = 0;
+  ctx.font = F(18); ctx.fillStyle = '#fff';
+  ctx.fillText('When will you fall down?', VW/2, VH*0.295);
+
+  // Berry position: follows finger while dragging, else gentle float
+  let bx, by, bsx = 1, bsy = 1;
+  if (titleDrag && inp.pressed) {
+    bx  = inp.x; by  = inp.y;
+    bsx = 1.12;  bsy = 0.88;   // squash while held
+  } else {
+    const bp = titleBerryPos();
+    bx = bp.x; by = bp.y;
+  }
+  const wr = Math.sin(title.wp * 1.1) * 0.09;
+
+  // Throw hint — bouncing arrow above berry (hidden while dragging)
+  if (!titleDrag) {
+    const arrowY = by - berry.r - 28 + Math.sin(T * 3.5) * 8;
+    ctx.save();
+    ctx.fillStyle = '#fff'; ctx.globalAlpha = title.alpha * 0.85;
+    ctx.font = F(28); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('👆', bx, arrowY);
+    ctx.font = F(16);
+    ctx.fillStyle = '#fff';
+    ctx.globalAlpha = title.alpha * (0.6 + 0.4 * Math.sin(T * 2.2));
+    ctx.fillText('Throw me up!', bx, by + berry.r + 26);
+    ctx.restore();
+  }
+
+  drawBerryPng(bx, by, bsx, bsy, wr, 0, titleDrag ? 'strawberry_ceiling' : 'strawberry_title');
+
+  audioControls();
+  // Full-screen tap fallback — any tap above controls triggers auto-throw
+  uiBtns.push({ id:'play', x:0, y:0, w:VW, h:VH - 80 });
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────
+// PLAYING STATE
+// ─────────────────────────────────────────────
+function updatePlaying() {
+  if (!noAnim) berry.wp += dT * 2;
+  berry.x = berry.bx + Math.sin(berry.wp) * berry.wa;
+
+  // Squash recovery
+  if (berry.sqTimer > 0) {
+    berry.sqTimer -= dT*60;
+    const t=berry.sqTimer/14;
+    berry.sx=1+Math.sin(t*Math.PI)*0.28; berry.sy=1-Math.sin(t*Math.PI)*0.22;
+  } else {
+    berry.sx+=(1-berry.sx)*Math.min(1,dT*9); berry.sy+=(1-berry.sy)*Math.min(1,dT*9);
+  }
+  berry.glow=Math.max(0,berry.glow-dT*3.5);
+
+  // Slowly drift the lean while peeling off the ceiling
+  if(berry.peeling){
+    const leanDir = berry.rot >= 0 ? 1 : -1;
+    berry.rot += leanDir * dT * 0.18;
+  }
+
+  // Drag catcher in lower half
+  if(inp.pressed && inp.y > VH*0.58){
+    catcher.x+=(inp.x-catcher.x)*0.35;
+    catcher.x=Math.max(catcher.w/2+8, Math.min(VW-catcher.w/2-8, catcher.x));
+  }
+
+  // Tap berry
+  if(inp.tap){
+    const d=Math.hypot(inp.tx-berry.x, inp.ty-berry.y);
+    if(d < berry.r*1.9) tapBerry();
+  }
+}
+
+function tapBerry() {
+  if(berry.taps >= berry.need || berry.peeling) return;
+  berry.taps++;
+
+  // Break one strand
+  const alive=goo.filter(s=>!s.broken);
+  if(alive.length>0){ const s=alive[alive.length-1]; s.broken=true; s.bt=T; }
+
+  berry.sx=0.62; berry.sy=1.38; berry.sqTimer=14;
+  berry.wa = 8 + (berry.taps/berry.need)*22;
+  berry.glow = 0.85;
+  spawnJuice(berry.x, berry.y-22);
+  play('tap_squish');
+
+  // Penultimate tap — subtle lean to hint it's about to go
+  if(berry.taps === berry.need - 1){
+    berry.rot = (Math.random() > 0.5 ? 1 : -1) * 0.13;
+  }
+
+  if(berry.taps >= berry.need){
+    berry.peeling = true;
+    play('sticky_peel');
+    setTimeout(() => { beginFall(); }, 700);
+  }
+}
+
+function beginFall() {
+  berry.peeling=false;
+  berry.vy=0.6; berry.vx=(Math.random()-.5)*3; berry.wa=0;
+  state=S.FALLING; play('falling_whistle');
+}
+
+function drawPlaying() {
+  drawBG();
+  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,berry.rot,berry.glow, berry.sqTimer>0?'strawberry_tap':'strawberry_ceiling');
+  drawCatcher();
+  updateDrawParticles();
+  // Tap hint for first round
+  if(round===1 && berry.taps===0){
+    const p=0.55+0.45*Math.sin(T*4);
+    ctx.save(); ctx.globalAlpha=p;
+    ctx.fillStyle='#fff'; ctx.font=F(21);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText('👆 Tap the strawberry!',VW/2,VH*0.34);
+    ctx.restore();
+  }
+  audioControls();
+}
+
+// ─────────────────────────────────────────────
+// FALLING STATE
+// ─────────────────────────────────────────────
+function updateFalling() {
+  berry.vy += 0.42*dT*60;
+  berry.rot += berry.vx*0.05*dT*60;
+
+  // Gentle homing toward catcher
+  const dx=catcher.x-berry.x;
+  if(Math.abs(dx)<160) berry.vx+=dx*0.009*dT*60;
+
+  berry.x+=berry.vx*dT*60; berry.y+=berry.vy*dT*60;
+
+  if(inp.pressed && inp.y>VH*0.58){
+    catcher.x+=(inp.x-catcher.x)*0.42;
+    catcher.x=Math.max(catcher.w/2+8, Math.min(VW-catcher.w/2-8, catcher.x));
+  }
+
+  // Recovery
+  berry.sx+=(1-berry.sx)*Math.min(1,dT*5); berry.sy+=(1-berry.sy)*Math.min(1,dT*5);
+
+  // Check hit floor near catcher
+  if(berry.y > catcher.y - catcher.h/2 - berry.r*0.75) doLanding();
+}
+
+function doLanding() {
+  const dx=Math.abs(berry.x-catcher.x);
+  let type;
+  if     (dx < catcher.hw/2)    type = catcher.type;
+  else if(dx < catcher.hw/2+45) type = 'boop';
+  else                           type = 'miss';
+
+  state=S.LANDING; celeb.type=type;
+  berry.sx=1.42; berry.sy=0.62; berry.vx=0; berry.vy=0; berry.rot=0;
+
+  if(type==='miss'){
+    berry.y=VH-102; berry.x=Math.max(55,Math.min(VW-55,berry.x));
+  } else {
+    berry.y=catcher.y-catcher.h/2-berry.r*0.75; berry.x=catcher.x;
+  }
+
+  catcher.bounce=Math.PI;
+  if(type==='teddy') catcher.hug=true;
+
+  const snd={pillow:'pillow_bounce',basket:'basket_pop',teddy:'teddy_hug',boop:'head_boop',miss:'giggle'};
+  play(snd[type]||'giggle');
+  spawnConfetti(berry.x,berry.y,26);
+  if(type==='boop') spawnStars(berry.x, berry.y-45);
+  berry.face.sm=1.38;
+
+  if(type==='miss') setTimeout(()=>{ berry.face.eo=0.12; berry.face.sm=0.52; },900);
+  setTimeout(()=>{ state=S.CELEBRATION; setTimeout(()=>{ celeb.showBtns=true; },900); },1300);
+}
+
+function drawFalling() {
+  drawBG();
+  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,berry.rot,0,'strawberry_falling');
+  drawCatcher(); updateDrawParticles(); audioControls();
+}
+
+// ─────────────────────────────────────────────
+// LANDING (brief transition)
+// ─────────────────────────────────────────────
+function updateLanding() {
+  berry.sx+=(1-berry.sx)*Math.min(1,dT*4.5); berry.sy+=(1-berry.sy)*Math.min(1,dT*4.5);
+  catcher.bounce=Math.max(0,catcher.bounce-dT*5);
+}
+
+function drawLanding() {
+  drawBG(); drawCatcher();
+  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,0,0.45,'strawberry_caught');
+  updateDrawParticles(); audioControls();
+}
+
+// ─────────────────────────────────────────────
+// CELEBRATION
+// ─────────────────────────────────────────────
+function celebMsg(t) {
+  return {
+    pillow:  '🎉 Soft landing! Yay!',
+    basket:  '🎊 In the basket! Hooray!',
+    teddy:   '🤗 Teddy hug! So sweet!',
+    boop:    '⭐ Boop! Hee hee hee!',
+    miss:    '😴 Sweet dreams, strawberry!',
+  }[t]||'🎉 Wonderful!';
+}
+
+function updateCelebration() {
+  berry.sx+=(1-berry.sx)*Math.min(1,dT*3); berry.sy+=(1-berry.sy)*Math.min(1,dT*3);
+  catcher.bounce=Math.max(0,catcher.bounce-dT*3);
+  if(celeb.type==='miss'){
+    const by=VH-130+Math.sin(T*1.4)*3;
+    berry.y+=(by-berry.y)*dT*2;
+  }
+}
+
+function drawCelebration() {
+  drawBG(); drawCatcher();
+  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,0, 0.28+0.18*Math.sin(T*3), celeb.type==='miss'?'strawberry_caught':'strawberry_celebration');
+  updateDrawParticles();
+
+  if(celeb.showBtns){
+    // Message bubble
+    ctx.save();
+    ctx.fillStyle='rgba(45,27,78,0.88)';
+    rr(VW*0.08,VH*0.38,VW*0.84,72,22); ctx.fill();
+    ctx.fillStyle='#fff'; ctx.font=F(21);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(celebMsg(celeb.type),VW/2,VH*0.38+36);
+    ctx.restore();
+
+    btn(VW/2-72,VH*0.56,124,62,'🍓 Again',C.red,'#fff','again');
+    btn(VW/2+72,VH*0.56,124,62,'🌙 Bed',C.nightBg2,'#fff','bedtime');
+  }
+  audioControls();
+}
+
+// ─────────────────────────────────────────────
+// BEDTIME
+// ─────────────────────────────────────────────
+function startBedtime() {
+  state=S.BEDTIME;
+  bed.dim=0; bed.going=true;
+  berry.face={eo:0.12,sm:0.55};
+  berry.x=VW/2; berry.y=VH-96; berry.rot=0.1;
+  berry.sx=1; berry.sy=1;
+  play('bedtime_chime');
+}
+
+function updateBedtime() {
+  if(bed.going) bed.dim=Math.min(0.88,bed.dim+dT*0.38);
+  // Gentle Zzz particles
+  if(Math.random()<0.018 && !noAnim){
+    parts.push({t:'star5',x:berry.x+28+Math.random()*18,y:berry.y-berry.r,
+      vx:0.3+Math.random()*0.5,vy:-0.7-Math.random()*0.5,r:7,col:C.lavender,life:1,dec:0.009,rot:0,rs:0});
+  }
+}
+
+function drawBedtime() {
+  drawBG();
+  // Tiny blanket over berry
+  ctx.save();
+  ctx.fillStyle=C.lavender;
+  rr(berry.x-56,berry.y+10,112,32,16); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.18)';
+  rr(berry.x-56,berry.y+10,112,13,16); ctx.fill();
+  ctx.restore();
+
+  const breathe=Math.sin(T*1.2)*0.02;
+  drawBerryPng(berry.x,berry.y,1+breathe,1-breathe,0.1,0,'strawberry_bedtime');
+  updateDrawParticles();
+
+  // Dim overlay
+  ctx.save(); ctx.fillStyle=`rgba(8,4,18,${bed.dim})`; ctx.fillRect(0,0,VW,VH); ctx.restore();
+
+  // Stars in sky during bedtime
+  if(bed.dim>0.25){
+    const a=(bed.dim-0.25)/0.63;
+    for(let i=0;i<16;i++){
+      const sx=35+(i*53)%(VW-70), sy=28+(i*37)%(VH*0.28);
+      const tw=0.45+0.55*Math.sin(T*2+i);
+      star5(sx,sy,5+(i%3)*2,C.star,Math.min(1,a)*tw);
+    }
+  }
+
+  // Goodnight text
+  if(bed.dim>0.52){
+    const a=Math.min(1,(bed.dim-0.52)/0.3);
+    ctx.save(); ctx.globalAlpha=a;
+    ctx.fillStyle='#fff'; ctx.font=F(34);
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.shadowBlur=18; ctx.shadowColor=C.lavender;
+    ctx.fillText('Goodnight,',VW/2,VH*0.22);
+    ctx.fillText('Sticky Strawberry 🍓',VW/2,VH*0.30);
+    ctx.restore();
+  }
+
+  // Polaroid snapshot
+  if(bed.dim > 0.62){
+    const a      = Math.min(1, (bed.dim - 0.62) / 0.22);
+    const keys   = ['snapshot_1','snapshot_2','snapshot_3'];
+    const tilts  = [-0.06, 0.05, -0.04];
+    const idx    = Math.floor(T / 3) % 3;
+    const img    = snapImgs[keys[idx]];
+    // Smooth cross-fade at each 3-second transition
+    const cycleT = T % 3;
+    const fade   = cycleT < 0.35 ? cycleT/0.35 : cycleT > 2.65 ? (3-cycleT)/0.35 : 1;
+
+    // Landscape polaroid — image area 230×161 (≈3:2), 14px border, 64px bottom
+    const iw = 230, ih = 161, pad = 14, bot = 64;
+    const pw = iw + pad*2;          // 258
+    const ph = ih + pad + bot;      // 239
+    const cx = VW/2, cy = VH*0.535;
+
+    ctx.save();
+    ctx.globalAlpha = a * fade;
+    ctx.translate(cx, cy);
+    ctx.rotate(tilts[idx]);
+
+    // Drop shadow
+    ctx.shadowBlur = 24; ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowOffsetY = 6;
+    ctx.fillStyle = '#fff';
+    rr(-pw/2, -ph/2, pw, ph, 3); ctx.fill();
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+
+    // Photo — "cover" crop to fill the image area regardless of source aspect ratio
+    if(img && img.complete && img.naturalWidth){
+      const dx = -pw/2 + pad, dy = -ph/2 + pad;
+      const srcR = img.naturalWidth / img.naturalHeight;
+      const dstR = iw / ih;
+      let sx, sy, sw, sh;
+      if(srcR > dstR){
+        sh = img.naturalHeight; sw = sh * dstR;
+        sx = (img.naturalWidth - sw) / 2; sy = 0;
+      } else {
+        sw = img.naturalWidth; sh = sw / dstR;
+        sx = 0; sy = (img.naturalHeight - sh) / 2;
+      }
+      ctx.drawImage(img, sx, sy, sw, sh, dx, dy, iw, ih);
+    } else {
+      // Placeholder while image loads
+      ctx.fillStyle = '#f0e8e8';
+      ctx.fillRect(-pw/2 + pad, -ph/2 + pad, iw, ih);
+    }
+
+    // Handwritten caption in the bottom white section
+    const captions = ['Daddy\'s little princess', 'Sleeping like bunnies', 'Fun times with Mama'];
+    const captionY = -ph/2 + pad + ih + bot/2;
+    ctx.fillStyle = '#444';
+    ctx.font = `600 18px "Caveat", cursive`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(captions[idx], 0, captionY);
+
+    ctx.restore();
+  }
+
+  // Replay button
+  if(bed.dim>0.72){
+    const a=Math.min(1,(bed.dim-0.72)/0.16);
+    btn(VW/2,VH*0.76,124,62,'🍓 Again',C.red,'#fff','replay',a);
+  }
+  audioControls();
+}
+
+// ─────────────────────────────────────────────
+// SING-ALONG OVERLAY
+// ─────────────────────────────────────────────
+function drawSingAlong() {
+  if(!sing.on || sing.line<0) return;
+  const line=LYRICS[sing.line]; if(!line) return;
+  const p=0.82+0.18*Math.sin(T*4);
+  ctx.save(); ctx.globalAlpha=p;
+  ctx.font=F(20); ctx.textAlign='center';
+  const tw=ctx.measureText(line).width;
+  const pw=Math.min(VW-36,tw+44);
+  ctx.fillStyle='rgba(45,27,78,0.9)';
+  rr(VW/2-pw/2,VH*0.725,pw,54,27); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.textBaseline='middle';
+  ctx.fillText(line,VW/2,VH*0.725+27);
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────
+// GAME LOOP
+// ─────────────────────────────────────────────
+function loop(ts) {
+  dT = Math.min(0.05,(ts-lastTs)/1000);
+  lastTs=ts; T+=dT;
+  uiBtns=[];
+
+  ctx.save(); ctx.scale(scale,scale);
+
+  switch(state){
+    case S.TITLE:        drawTitle();                         break;
+    case S.THROWING:     updateThrow(); drawThrow();          break;
+    case S.PLAYING:      updatePlaying();    drawPlaying();       drawSingAlong(); break;
+    case S.FALLING:      updateFalling();    drawFalling();       drawSingAlong(); break;
+    case S.LANDING:      updateLanding();    drawLanding();                        break;
+    case S.CELEBRATION:  updateCelebration();drawCelebration();   drawSingAlong(); break;
+    case S.BEDTIME:      updateBedtime();    drawBedtime();                        break;
+  }
+
+  ctx.restore();
+
+  // Process taps (after draw so buttons are registered)
+  if(inp.tap){ hitBtns(inp.tx,inp.ty); inp.tap=false; }
+
+  requestAnimationFrame(loop);
+}
+
+// ─────────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────────
+initStars();
+Object.keys(ASSETS.audio).forEach(loadAudio);
+requestAnimationFrame(ts => { lastTs=ts; requestAnimationFrame(loop); });
+
+// ─────────────────────────────────────────────
+// SERVICE WORKER REGISTRATION
+// ─────────────────────────────────────────────
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
