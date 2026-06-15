@@ -154,6 +154,7 @@ function onStart(cx, cy) {
   const v = toV(cx, cy);
   inp.pressed = true; inp.x = v.x; inp.y = v.y;
   audioUnlock();
+  if (state === S.TITLE) startMusic();
   if (volSlider && v.x >= volSlider.x && v.x <= volSlider.x + volSlider.w &&
       v.y >= volSlider.y && v.y <= volSlider.y + volSlider.h) {
     volDrag = true;
@@ -292,14 +293,11 @@ document.addEventListener('visibilitychange', () => {
 function startMusic() {
   if (!audioReady || musicStarted) return;
   musicStarted = true;
-  loadAudio('song');
-  setTimeout(() => {
-    const el = audioEl['song'];
-    if (!el) return;
-    el.loop = true;
-    el.volume = soundOn ? musicVol : 0;
-    el.play().catch(() => {});
-  }, 80);
+  const el = audioEl['song'];
+  if (!el) return;
+  el.loop = true;
+  el.volume = soundOn ? musicVol : 0;
+  el.play().catch(() => {});
 }
 
 function setMusicVol(v) {
@@ -309,8 +307,8 @@ function setMusicVol(v) {
   if (el && soundOn) el.volume = musicVol;
 }
 
-// Preload commonly used sounds
-['tap_squish','sticky_peel','falling_whistle','pillow_bounce','basket_pop','teddy_hug','head_boop','giggle','bedtime_chime'].forEach(loadAudio);
+// Preload all sounds including the background song
+['song','tap_squish','sticky_peel','falling_whistle','pillow_bounce','basket_pop','teddy_hug','head_boop','giggle','bedtime_chime'].forEach(loadAudio);
 
 // ─────────────────────────────────────────────
 // BACKGROUND IMAGE
@@ -1292,7 +1290,7 @@ function hitBtns(tx, ty) {
 function doBtn(id) {
   switch(id){
     case 'play':    startThrow(); break;
-    case 'again':   startThrow(); break;
+    case 'again':   state=S.TITLE; title.alpha=0; break;
     case 'bedtime': startBedtime(); break;
     case 'replay':  state=S.TITLE; title.alpha=0; break;
     case 'sound':
