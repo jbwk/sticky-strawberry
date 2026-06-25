@@ -57,6 +57,7 @@
 const ASSETS = {
   images: {
     background:             'assets/images/background.jpg',
+    logo:                   'assets/images/logo.png',
     strawberry_title:       'assets/images/strawberry_title.png',
     strawberry_ceiling:     'assets/images/strawberry_ceiling.png',
     strawberry_tap:         'assets/images/strawberry_tap.png',
@@ -70,6 +71,10 @@ const ASSETS = {
     pillow:                 'assets/images/pillow.png',
     basket:                 'assets/images/basket.png',
     teddybear:              'assets/images/teddybear.png',
+    btn_again:              'assets/images/play-again.png',
+    btn_bedtime:            'assets/images/bedtime.png',
+    volume_on:              'assets/images/volume-on.png',
+    volume_off:             'assets/images/volume-off.png',
   },
   audio: {
     song:             'assets/audio/full_song.mp3',
@@ -155,18 +160,13 @@ function onStart(cx, cy) {
   inp.pressed = true; inp.x = v.x; inp.y = v.y;
   audioUnlock();
   if (state === S.TITLE) startMusic();
-  if (volSlider && v.x >= volSlider.x && v.x <= volSlider.x + volSlider.w &&
-      v.y >= volSlider.y && v.y <= volSlider.y + volSlider.h) {
-    volDrag = true;
-    setMusicVol((v.x - volSlider.tx) / volSlider.tw);
-  } else if (state === S.TITLE) {
+  if (state === S.TITLE) {
     // Check if grabbing the berry (generous radius for small fingers)
     const bp = titleBerryPos();
     if (Math.hypot(v.x - bp.x, v.y - bp.y) < berry.r * 1.8) {
       titleDrag = true;
       velHist = [{ x: v.x, y: v.y, t: performance.now() }];
     } else {
-      // Tapped outside berry on title screen — auto-throw as fallback
       inp.tap = true; inp.tx = v.x; inp.ty = v.y;
     }
   } else {
@@ -177,43 +177,47 @@ function onMove(cx, cy) {
   if (!inp.pressed) return;
   const v = toV(cx, cy);
   inp.x = v.x; inp.y = v.y;
-  if (volDrag && volSlider) {
-    setMusicVol((v.x - volSlider.tx) / volSlider.tw);
-  }
   if (titleDrag) {
     velHist.push({ x: v.x, y: v.y, t: performance.now() });
     if (velHist.length > 24) velHist.shift();
   }
 }
 function onEnd() {
-  inp.pressed = false; volDrag = false;
+  inp.pressed = false;
   if (titleDrag && state === S.TITLE) {
     titleDrag = false;
-    // Compute release velocity from last ~90ms of movement
+    // Measure the release swipe (last ~90ms of movement)
     const now = performance.now();
     const recent = velHist.filter(h => now - h.t < 90);
-    let rvx = 0, rvy = -1600;
+    let rvx = 0, rvy = 0;
     if (recent.length >= 2) {
       const f = recent[0], l = recent[recent.length - 1];
       const dt = (l.t - f.t) / 1000;
       if (dt > 0.008) {
         rvx = (l.x - f.x) / dt;
-        const rawVy = (l.y - f.y) / dt;
-        if (rawVy < -150) rvy = Math.max(-2600, rawVy);
+        rvy = (l.y - f.y) / dt;   // negative = upward
       }
     }
-    // Launch from where the finger was
-    const last = velHist[velHist.length - 1] || { x: VW/2, y: VH*0.63 };
-    title.tx    = Math.max(berry.r, Math.min(VW - berry.r, last.x));
-    title.ty    = Math.min(VH * 0.78, last.y);
-    title.tvx   = Math.max(-350, Math.min(350, rvx));
-    title.tvy   = rvy;
-    title.trot  = rvx * 0.0003;
-    title.tphase = 'flying';
-    title.ttime  = 0;
-    title.tsx = 1; title.tsy = 1;
-    startMusic();
-    state = S.THROWING;
+    const last = velHist[velHist.length - 1] || titleBerryPos();
+    if (rvy <= -THROW_MIN) {
+      // Genuine upward swipe → throw with its real strength.
+      // Weak throws won't reach the ceiling and will fall back for another try.
+      title.tx     = Math.max(berry.r, Math.min(VW - berry.r, last.x));
+      title.ty     = Math.min(VH * 0.78, last.y);
+      title.startY = title.ty;
+      title.tvx    = Math.max(-350, Math.min(350, rvx));
+      title.tvy    = Math.max(-2600, rvy);
+      title.trot   = rvx * 0.0003;
+      title.tphase = 'flying';
+      title.ttime  = 0;
+      title.tsx = 1; title.tsy = 1;
+      startMusic();
+      state = S.THROWING;
+    } else {
+      // Just a tap (no real throw) → pulse for feedback, stay on title
+      title.pulse = PULSE_DUR;
+      play('tap_squish');
+    }
   }
   titleDrag = false;
 }
@@ -233,8 +237,6 @@ let musicVol = parseFloat(localStorage.getItem('musicVol') ?? '0.7');
 let musicStarted = false;
 let audioReady = false;
 const audioEl = {};
-let volSlider = null;   // set each frame by audioControls()
-let volDrag   = false;
 
 function audioUnlock() {
   if (audioReady) return;
@@ -300,13 +302,6 @@ function startMusic() {
   el.play().catch(() => {});
 }
 
-function setMusicVol(v) {
-  musicVol = Math.max(0, Math.min(1, v));
-  localStorage.setItem('musicVol', musicVol);
-  const el = audioEl['song'];
-  if (el && soundOn) el.volume = musicVol;
-}
-
 // Preload all sounds including the background song
 ['song','tap_squish','sticky_peel','falling_whistle','pillow_bounce','basket_pop','teddy_hug','head_boop','giggle','bedtime_chime'].forEach(loadAudio);
 
@@ -319,6 +314,15 @@ let bgImg = null;
   img.onload = () => { bgImg = img; };
   img.onerror = () => { bgImg = null; };
   img.src = ASSETS.images.background;
+})();
+
+// Title logo (title + tagline baked in)
+let logoImg = null;
+(function loadLogo() {
+  const img = new Image();
+  img.onload = () => { logoImg = img; };
+  img.onerror = () => { logoImg = null; };
+  img.src = ASSETS.images.logo;
 })();
 
 // ─────────────────────────────────────────────
@@ -350,6 +354,16 @@ const snapImgs = {};
   const img = new Image();
   img.src = ASSETS.images[key];
   snapImgs[key] = img;
+});
+
+// ─────────────────────────────────────────────
+// UI BUTTON IMAGES
+// ─────────────────────────────────────────────
+const uiImgs = {};
+['btn_again','btn_bedtime','volume_on','volume_off'].forEach(key => {
+  const img = new Image();
+  img.src = ASSETS.images[key];
+  uiImgs[key] = img;
 });
 
 // ─────────────────────────────────────────────
@@ -386,12 +400,16 @@ const noAnim = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 // ─────────────────────────────────────────────
 // GAME OBJECTS
 // ─────────────────────────────────────────────
-const CEIL_Y = 108;   // ceiling y — clear of Dynamic Island safe area
+const CEIL_Y = 108;        // ceiling y — clear of Dynamic Island safe area
+const CATCHER_SPEED = 150; // px/s — sideways sweep speed of the catcher
+const WIG_DUR = 0.55;      // duration (s) of an occasional ceiling wiggle
+const THROW_MIN = 500;     // min upward swipe speed (px/s) to count as a throw vs a tap
+const PULSE_DUR = 0.4;     // duration (s) of the tap pulse on the title berry
 
 const berry = {
   x:0, y:0, bx:0, by:0,           // current & base position
-  r:54,                             // radius (20% larger for iPhone)
-  wp:0, wa:8,                       // wobble phase & amplitude
+  r:38,                             // radius (smaller = real catching stakes)
+  wp:0, wa:8, wig:0,                // wobble phase / amplitude / wiggle timer
   sx:1, sy:1,                       // squash x/y
   rot:0, vx:0, vy:0,
   taps:0, need:4,                   // tap progress
@@ -401,8 +419,9 @@ const berry = {
 
 const catcher = {
   x: VW/2, y: 720,
-  w: 128, hw: 172,                  // visual / hit width
-  h: 52, type:'pillow',
+  w: 132, hw: 96,                   // travel-clamp width / catch tolerance width
+  h: 40, type:'pillow',
+  vx: CATCHER_SPEED,                // sideways velocity (auto-sweep)
   bounce:0, hug:false,
 };
 
@@ -421,12 +440,15 @@ let bed = { dim:0, going:false };
 let sing = { on:false, line:-1, timer:0, dur:3.2 };
 
 // Title
-let title = { alpha:0, wp:0 };
+let title = { alpha:0, wp:0, pulse:0 };
 let titleDrag = false;   // player is holding the berry on title screen
 let velHist   = [];      // [{x,y,t}] recent positions for throw velocity
 
 // Timing
 let T = 0, dT = 0, lastTs = 0, round = 0;
+
+// Catch streak (consecutive clean catches)
+let streak = 0, streakPop = 0;
 
 // ─────────────────────────────────────────────
 // INIT / ROUND SETUP
@@ -449,8 +471,10 @@ function newRound(throwX, throwRot) {
   round++;
   berry.need  = 2 + Math.floor(Math.random() * 9);  // 2–10 taps (surprise!)
   berry.taps  = 0;
+  // Keep the resting column within the catcher's reach so a catch is always possible
+  const reachMin = catcher.w/2 + 8, reachMax = VW - catcher.w/2 - 8;
   berry.bx    = throwX !== undefined
-    ? Math.max(CEIL_Y, Math.min(VW - berry.r - 8, throwX))
+    ? Math.max(reachMin, Math.min(reachMax, throwX))
     : VW/2 + (Math.random()-.5)*80;
   berry.by    = CEIL_Y;  // pressed against the ceiling
   berry.x     = berry.bx; berry.y = berry.by;
@@ -463,6 +487,7 @@ function newRound(throwX, throwRot) {
   const types = ['pillow','basket','teddy'];
   catcher.type   = types[round % 3];
   catcher.x      = VW/2;
+  catcher.vx     = (Math.random()<0.5?-1:1) * CATCHER_SPEED;  // sweep starts in a random direction
   catcher.bounce = 0;
   catcher.hug    = false;
 
@@ -506,6 +531,79 @@ function star5(x, y, r, col, a=1) {
     else          ctx.lineTo(x + Math.cos(ang)*rad, y + Math.sin(ang)*rad);
   }
   ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawHeart(x, y, r, col, a=1, rot=0) {
+  ctx.save();
+  ctx.globalAlpha = a; ctx.fillStyle = col;
+  ctx.translate(x, y); ctx.rotate(rot);
+  const w = r;
+  ctx.beginPath();
+  ctx.moveTo(0, w*0.32);
+  ctx.bezierCurveTo(-w*0.5, -w*0.32, -w, w*0.12, 0, w);     // left lobe → bottom point
+  ctx.bezierCurveTo(w, w*0.12, w*0.5, -w*0.32, 0, w*0.32);  // right lobe → back to dip
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+// Bubbly outlined text — white fill with a berry-red outline, no background needed
+function outlineText(text, x, y, size, align='center', fill='#fff', stroke=C.darkRed) {
+  ctx.save();
+  ctx.font = F(size);
+  ctx.textAlign = align; ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round'; ctx.miterLimit = 2;
+  ctx.strokeStyle = stroke; ctx.lineWidth = Math.max(3, size * 0.2);
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = fill;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+// Small strawberry icon, drawn with the same outlined styling as the text
+function drawBerryIcon(cx, cy, s) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.lineJoin = 'round';
+  // Body — rounded teardrop, point at the bottom
+  ctx.beginPath();
+  ctx.moveTo(0, s);
+  ctx.bezierCurveTo(-s*1.05, s*0.35, -s*0.95, -s*0.55, 0, -s*0.5);
+  ctx.bezierCurveTo(s*0.95, -s*0.55, s*1.05, s*0.35, 0, s);
+  ctx.closePath();
+  ctx.fillStyle = C.red; ctx.strokeStyle = C.darkRed; ctx.lineWidth = Math.max(2, s*0.2);
+  ctx.fill(); ctx.stroke();
+  // Calyx — three little leaves
+  ctx.fillStyle = C.leafMid; ctx.strokeStyle = C.darkGreen; ctx.lineWidth = Math.max(1.5, s*0.14);
+  for (let i=-1;i<=1;i++){
+    ctx.save(); ctx.rotate(i*0.6); ctx.translate(0,-s*0.55);
+    ctx.beginPath();
+    ctx.moveTo(0, s*0.18);
+    ctx.quadraticCurveTo(-s*0.3, -s*0.1, 0, -s*0.42);
+    ctx.quadraticCurveTo(s*0.3, -s*0.1, 0, s*0.18);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// Up-pointing arrow, outlined to match the text styling
+function drawArrowUp(cx, cy, s, alpha=1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(cx, cy);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = C.darkRed; ctx.lineWidth = Math.max(2.5, s*0.22);
+  ctx.beginPath();
+  ctx.moveTo(0, -s);              // tip
+  ctx.lineTo(s*0.8, -s*0.05);
+  ctx.lineTo(s*0.32, -s*0.05);
+  ctx.lineTo(s*0.32, s);
+  ctx.lineTo(-s*0.32, s);
+  ctx.lineTo(-s*0.32, -s*0.05);
+  ctx.lineTo(-s*0.8, -s*0.05);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
   ctx.restore();
 }
 
@@ -913,10 +1011,18 @@ function drawGooStrand(x1, y1, x2, y2, w1, w2) {
 // Draw rects for each catcher type (in translated context where 0,0 = catcher anchor)
 // Anchor is the centre of the catch surface — berry lands at y = -catcher.h/2
 const CATCHER_RECTS = {
-  pillow:   { key:'pillow',    x:-100, y:-50,  w:200, h:100  },
-  basket:   { key:'basket',    x:-100, y:-90,  w:200, h:140  },
-  teddy:    { key:'teddybear', x:-90,  y:-130, w:180, h:170  },
+  pillow:   { key:'pillow',    x:-70, y:-35, w:140, h:70  },
+  basket:   { key:'basket',    x:-70, y:-48, w:140, h:98  },
+  teddy:    { key:'teddybear', x:-63, y:-79, w:126, h:119 },
 };
+
+// Auto-sweep the catcher side to side, bouncing off the play-area edges
+function moveCatcher() {
+  const minX = catcher.w/2 + 8, maxX = VW - catcher.w/2 - 8;
+  catcher.x += catcher.vx * dT;
+  if (catcher.x <= minX) { catcher.x = minX; catcher.vx =  Math.abs(catcher.vx); }
+  else if (catcher.x >= maxX) { catcher.x = maxX; catcher.vx = -Math.abs(catcher.vx); }
+}
 
 function drawCatcher() {
   ctx.save();
@@ -1138,10 +1244,12 @@ function spawnJuice(x, y) {
     parts.push({ t:'dot', x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-2.2,
       r:3.5+Math.random()*4, col:cols[i%cols.length], life:1, dec:0.026+Math.random()*0.01 });
   }
-  for(let i=0;i<3;i++){
-    parts.push({ t:'star5', x:x+(Math.random()-.5)*44, y:y+(Math.random()-.5)*44,
-      vx:(Math.random()-.5)*1.4, vy:-1-Math.random()*2, r:6+Math.random()*4,
-      col:C.star, life:1, dec:0.022, rot:0, rs:0 });
+  const heartCols=['#ff4d94','#ff6b9d','#ff8fab','#e63946'];
+  for(let i=0;i<4;i++){
+    parts.push({ t:'heart', x:x+(Math.random()-.5)*30, y:y+(Math.random()-.5)*20,
+      vx:(Math.random()-.5)*1.6, vy:-1.4-Math.random()*2, r:6+Math.random()*4,
+      col:heartCols[i%heartCols.length], life:1, dec:0.02,
+      rot:(Math.random()-.5)*0.6, rs:(Math.random()-.5)*0.08 });
   }
 }
 
@@ -1152,6 +1260,15 @@ function spawnConfetti(x, y, n=22) {
     parts.push({ t:'rect', x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp,
       r:5+Math.random()*5, col:cols[i%cols.length], life:1,
       dec:0.007+Math.random()*0.005, rot:Math.random()*Math.PI*2, rs:(Math.random()-.5)*0.18 });
+  }
+  // A few hearts mixed into the burst
+  const heartCols=['#ff4d94','#ff6b9d','#ff8fab','#e63946'];
+  const hn=Math.max(4,Math.round(n*0.3));
+  for(let i=0;i<hn;i++){
+    const a=-Math.PI/2+(Math.random()-.5)*Math.PI, sp=2.5+Math.random()*4.5;
+    parts.push({ t:'heart', x,y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp,
+      r:7+Math.random()*5, col:heartCols[i%heartCols.length], life:1,
+      dec:0.008+Math.random()*0.005, rot:(Math.random()-.5)*0.8, rs:(Math.random()-.5)*0.12 });
   }
 }
 
@@ -1172,6 +1289,8 @@ function updateDrawParticles() {
       ctx.fillStyle=p.col; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill();
     } else if (p.t==='star5') {
       star5(p.x,p.y,p.r,p.col,p.life);
+    } else if (p.t==='heart') {
+      drawHeart(p.x,p.y,p.r,p.col,p.life,p.rot);
     } else if (p.t==='rect') {
       ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.rot);
       ctx.fillStyle=p.col; ctx.fillRect(-p.r,-p.r*0.5,p.r*2,p.r); ctx.restore();
@@ -1182,6 +1301,7 @@ function updateDrawParticles() {
     p.life-=p.dec*dT*60;
     p.r=Math.max(0,p.r-0.04*dT*60);
     if(p.t==='rect'){ p.rot+=p.rs*dT*60; p.vx*=0.99; }
+    else if(p.t==='heart'){ p.rot+=p.rs*dT*60; }
   });
 }
 
@@ -1231,53 +1351,41 @@ function btn(x, y, w, h, label, bg, fg, id, alpha=1) {
   uiBtns.push({id, x:x-hw, y:y-hh, w, h});
 }
 
-function audioControls() {
-  ctx.save();
-
-  // Controls sit at the bottom centre, above the home-indicator safe area
-  const cy  = VH - 40;   // vertical centre of the controls row
-  const r   = 24;        // mute button radius
-  const gap = 14;        // gap between slider and button
-  const slW = 140;       // slider track width
-  const slH = 8;
-  // Layout: [slider] gap [button]
-  // Total width = slW + gap + r*2 = 140+14+48 = 202; centred at VW/2
-  const totalW = slW + gap + r * 2;
-  const rowLeft = (VW - totalW) / 2;
-  const slX  = rowLeft;              // slider track left x
-  const btnX = rowLeft + slW + gap + r;  // button centre x
-
-  // ── pill track background ──
-  ctx.fillStyle = 'rgba(20,8,50,0.60)';
-  ctx.beginPath(); ctx.roundRect(slX, cy - slH/2, slW, slH, slH/2); ctx.fill();
-
-  // ── colored fill ──
-  const fillW = slW * musicVol;
-  if (fillW > slH) {
-    ctx.fillStyle = C.pink;
-    ctx.beginPath(); ctx.roundRect(slX, cy - slH/2, fillW, slH, slH/2); ctx.fill();
+// PNG-based button — drawn centred at (x,y) scaled to targetW, aspect preserved
+function imgBtn(key, x, y, targetW, id, alpha=1) {
+  const img = uiImgs[key];
+  const ar  = (img && img.naturalWidth) ? img.naturalHeight / img.naturalWidth : 0.45;
+  const w = targetW, h = targetW * ar;
+  if (img && img.complete && img.naturalWidth) {
+    ctx.save(); ctx.globalAlpha = alpha;
+    ctx.drawImage(img, x - w/2, y - h/2, w, h);
+    ctx.restore();
   }
+  uiBtns.push({ id, x: x - w/2, y: y - h/2, w, h });
+}
 
-  // ── thumb ──
-  const thumbX = slX + slW * musicVol;
-  ctx.shadowBlur = 6; ctx.shadowColor = 'rgba(0,0,0,0.45)';
-  ctx.fillStyle = '#fff';
-  ctx.beginPath(); ctx.arc(thumbX, cy, 11, 0, Math.PI*2); ctx.fill();
-  ctx.shadowBlur = 0;
+function drawStreak() {
+  if (streak < 1) return;
+  if (streakPop > 0) streakPop = Math.max(0, streakPop - dT);
+  const prog = streakPop > 0 ? 1 - streakPop / 0.6 : 1;
+  const pop  = 1 + Math.sin(prog * Math.PI) * 0.18;   // brief scale-up on a new catch
 
-  // store bounds for drag (generous hit area)
-  volSlider = { x: slX - 12, y: cy - 22, w: slW + 24, h: 44, tx: slX, tw: slW };
-
-  // ── mute/unmute button ──
-  ctx.fillStyle = 'rgba(20,8,50,0.78)';
-  ctx.beginPath(); ctx.arc(btnX, cy, r, 0, Math.PI*2); ctx.fill();
-  ctx.strokeStyle = C.lavender; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.arc(btnX, cy, r, 0, Math.PI*2); ctx.stroke();
-  ctx.font = F(18); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(soundOn ? '🔊' : '🔇', btnX, cy);
-
+  // Bottom-left: strawberry icon + outlined "×N", no background
+  const cx = 30, cy = VH - 42;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(pop, pop);
+  drawBerryIcon(0, 0, 15);
+  outlineText('×' + streak, 24, 1, 26, 'left');
   ctx.restore();
-  uiBtns.push({id:'sound', x: btnX-r, y: cy-r, w: r*2, h: r*2});
+}
+
+function audioControls() {
+  // Volume toggle (PNG) in the bottom-right corner, above the home-indicator safe area
+  const size = 52;
+  const cx = VW - size/2 - 14;
+  const cy = VH - 40;
+  imgBtn(soundOn ? 'volume_on' : 'volume_off', cx, cy, size, 'sound');
 }
 
 function hitBtns(tx, ty) {
@@ -1291,7 +1399,6 @@ function hitBtns(tx, ty) {
 
 function doBtn(id) {
   switch(id){
-    case 'play':    startThrow(); break;
     case 'again':   state=S.TITLE; title.alpha=0; break;
     case 'bedtime': startBedtime(); break;
     case 'replay':  state=S.TITLE; title.alpha=0; break;
@@ -1319,50 +1426,26 @@ function doBtn(id) {
 // title.tphase — 'flying' | 'squash'
 // title.tsq    — squash timer (frames)
 
-function startThrow() {
-  startMusic();
-  const bp     = titleBerryPos();
-  title.tx     = bp.x;
-  title.ty     = bp.y;
-  title.startY = title.ty;
-  title.tvx    = (Math.random()-0.5)*80;  // px/s horizontal drift
-  title.tvy    = 0;
-  title.trot   = Math.sin(title.wp*1.1)*0.09;
-  title.tphase = 'dip';   // small dip before the upward throw
-  title.ttime  = 0;
-  title.tsx    = 1;
-  title.tsy    = 1;
-  state = S.THROWING;
-}
-
 function updateThrow() {
   title.ttime += dT;
 
-  if (title.tphase === 'dip') {
-    // Smooth ease-down arc over 0.12s — berry dips ~30px then springs back to start
-    const p = Math.min(1, title.ttime / 0.12);
-    title.ty = title.startY + Math.sin(p * Math.PI) * 30;
-    if (p >= 1) {
-      title.tphase = 'flying';
-      title.ttime  = 0;
-      title.ty     = title.startY;
-      title.tvy    = -1600;  // px/s — strong enough to clear 350px to ceiling
-    }
-
-  } else if (title.tphase === 'flying') {
+  if (title.tphase === 'flying') {
     title.tvy  += 1900 * dT;              // gravity px/s²
     title.tvx  *= Math.pow(0.97, dT*60);
     title.tx   += title.tvx * dT;
     title.ty   += title.tvy * dT;
     title.trot += title.tvx * 0.0006 * dT * 60;
 
-    const ceilY = CEIL_Y;
-    if (title.ty <= ceilY) {
-      title.ty     = ceilY;
+    if (title.ty <= CEIL_Y) {
+      // Reached the ceiling — stick!
+      title.ty     = CEIL_Y;
       title.tphase = 'squash';
       title.ttime  = 0;
       play('tap_squish');
       spawnJuice(title.tx, title.ty + berry.r);
+    } else if (title.tvy > 0 && title.ty >= title.startY) {
+      // Too weak — fell back down without sticking; return to title to try again
+      state = S.TITLE;
     }
 
   } else if (title.tphase === 'squash') {
@@ -1392,19 +1475,27 @@ function drawTitle() {
 
   drawBG();
 
-  // Title text
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.shadowBlur = 22; ctx.shadowColor = 'rgba(255,100,130,0.65)';
-  ctx.font = F(56);
-  ctx.strokeStyle = C.pink; ctx.lineWidth = 7; ctx.lineJoin = 'round';
-  ctx.strokeText('Sticky', VW/2, VH*0.145);
-  ctx.strokeText('Strawberry', VW/2, VH*0.225);
-  ctx.fillStyle = '#fff';
-  ctx.fillText('Sticky', VW/2, VH*0.145);
-  ctx.fillText('Strawberry', VW/2, VH*0.225);
-  ctx.shadowBlur = 0;
-  ctx.font = F(18); ctx.fillStyle = '#fff';
-  ctx.fillText('When will you fall down?', VW/2, VH*0.295);
+  // Logo (title + tagline baked in) — gentle bob
+  if (logoImg && logoImg.complete && logoImg.naturalWidth) {
+    const lw = VW * 0.94;
+    const lh = lw * (logoImg.naturalHeight / logoImg.naturalWidth);
+    const ly = VH * 0.205 + Math.sin(title.wp * 0.8) * 4;   // vertical centre, soft bob
+    ctx.drawImage(logoImg, (VW - lw) / 2, ly - lh / 2, lw, lh);
+  } else {
+    // Fallback to drawn text if the logo hasn't loaded
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowBlur = 22; ctx.shadowColor = 'rgba(255,100,130,0.65)';
+    ctx.font = F(56);
+    ctx.strokeStyle = C.pink; ctx.lineWidth = 7; ctx.lineJoin = 'round';
+    ctx.strokeText('Sticky', VW/2, VH*0.145);
+    ctx.strokeText('Strawberry', VW/2, VH*0.225);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('Sticky', VW/2, VH*0.145);
+    ctx.fillText('Strawberry', VW/2, VH*0.225);
+    ctx.shadowBlur = 0;
+    ctx.font = F(18); ctx.fillStyle = '#fff';
+    ctx.fillText('When will you fall down?', VW/2, VH*0.295);
+  }
 
   // Berry position: follows finger while dragging, else gentle float
   let bx, by, bsx = 1, bsy = 1;
@@ -1419,23 +1510,26 @@ function drawTitle() {
 
   // Throw hint — bouncing arrow above berry (hidden while dragging)
   if (!titleDrag) {
-    const arrowY = by - berry.r - 28 + Math.sin(T * 3.5) * 8;
+    const arrowY = by - berry.r - 30 + Math.sin(T * 3.5) * 8;
     ctx.save();
-    ctx.fillStyle = '#fff'; ctx.globalAlpha = title.alpha * 0.85;
-    ctx.font = F(28); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('👆', bx, arrowY);
-    ctx.font = F(16);
-    ctx.fillStyle = '#fff';
+    ctx.globalAlpha = title.alpha * 0.9;
+    drawArrowUp(bx, arrowY, 13);
     ctx.globalAlpha = title.alpha * (0.6 + 0.4 * Math.sin(T * 2.2));
-    ctx.fillText('Throw me up!', bx, by + berry.r + 26);
+    outlineText('Throw me up!', bx, by + berry.r + 28, 18);
     ctx.restore();
+  }
+
+  // Tap pulse — gentle scale-up-and-back when the berry is tapped (not thrown)
+  if (title.pulse > 0) {
+    title.pulse = Math.max(0, title.pulse - dT);
+    const pp = 1 - title.pulse / PULSE_DUR;        // 0 → 1
+    const s  = 1 + Math.sin(pp * Math.PI) * 0.16;  // 1 → 1.16 → 1
+    bsx *= s; bsy *= s;
   }
 
   drawBerryPng(bx, by, bsx, bsy, wr, 0, titleDrag ? 'strawberry_ceiling' : 'strawberry_title');
 
   audioControls();
-  // Full-screen tap fallback — any tap above controls triggers auto-throw
-  uiBtns.push({ id:'play', x:0, y:0, w:VW, h:VH - 80 });
   ctx.restore();
 }
 
@@ -1443,8 +1537,10 @@ function drawTitle() {
 // PLAYING STATE
 // ─────────────────────────────────────────────
 function updatePlaying() {
-  if (!noAnim) berry.wp += dT * 2;
-  berry.x = berry.bx + Math.sin(berry.wp) * berry.wa;
+  // Hangs still on the ceiling; x stays fixed and the wiggle is rotational (see drawPlaying)
+  berry.x = berry.bx;
+  if (berry.wig > 0) berry.wig -= dT;
+  else if (!noAnim && !berry.peeling && Math.random() < dT * 0.4) berry.wig = WIG_DUR;
 
   // Squash recovery
   if (berry.sqTimer > 0) {
@@ -1462,11 +1558,8 @@ function updatePlaying() {
     berry.rot += leanDir * dT * 0.18;
   }
 
-  // Drag catcher in lower half
-  if(inp.pressed && inp.y > VH*0.58){
-    catcher.x+=(inp.x-catcher.x)*0.35;
-    catcher.x=Math.max(catcher.w/2+8, Math.min(VW-catcher.w/2-8, catcher.x));
-  }
+  // Catcher sweeps side to side on its own
+  moveCatcher();
 
   // Tap berry
   if(inp.tap){
@@ -1484,7 +1577,7 @@ function tapBerry() {
   if(alive.length>0){ const s=alive[alive.length-1]; s.broken=true; s.bt=T; }
 
   berry.sx=0.62; berry.sy=1.38; berry.sqTimer=14;
-  berry.wa = 8 + (berry.taps/berry.need)*22;
+  berry.wig = WIG_DUR;          // little jiggle on each tap
   berry.glow = 0.85;
   spawnJuice(berry.x, berry.y-22);
   play('tap_squish');
@@ -1496,6 +1589,7 @@ function tapBerry() {
 
   if(berry.taps >= berry.need){
     berry.peeling = true;
+    berry.wa = 0;            // settle to its column so it drops straight down
     play('sticky_peel');
     setTimeout(() => { beginFall(); }, 700);
   }
@@ -1503,24 +1597,32 @@ function tapBerry() {
 
 function beginFall() {
   berry.peeling=false;
-  berry.vy=0.6; berry.vx=(Math.random()-.5)*3; berry.wa=0;
+  berry.vy=0.6; berry.vx=0; berry.wa=0;   // straight drop — no horizontal drift
+  berry.rot=0;
   state=S.FALLING; play('falling_whistle');
 }
 
 function drawPlaying() {
   drawBG();
-  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,berry.rot,berry.glow, berry.sqTimer>0?'strawberry_tap':'strawberry_ceiling');
+  // One tap left → show the falling graphic as an "about to drop" cue
+  const berryKey = berry.taps >= berry.need - 1 ? 'strawberry_falling'
+                 : berry.sqTimer > 0            ? 'strawberry_tap'
+                 :                                'strawberry_ceiling';
+  // Subtle rotational wiggle (decays over WIG_DUR)
+  const wigRot = (berry.wig > 0 && !berry.peeling)
+    ? Math.sin((WIG_DUR - berry.wig) * 26) * 0.09 * (berry.wig / WIG_DUR)
+    : 0;
+  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,berry.rot + wigRot,berry.glow, berryKey);
   drawCatcher();
   updateDrawParticles();
   // Tap hint for first round
   if(round===1 && berry.taps===0){
     const p=0.55+0.45*Math.sin(T*4);
     ctx.save(); ctx.globalAlpha=p;
-    ctx.fillStyle='#fff'; ctx.font=F(21);
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText('👆 Tap the strawberry!',VW/2,VH*0.34);
+    outlineText('Tap the strawberry!',VW/2,VH*0.34,21);
     ctx.restore();
   }
+  drawStreak();
   audioControls();
 }
 
@@ -1529,18 +1631,12 @@ function drawPlaying() {
 // ─────────────────────────────────────────────
 function updateFalling() {
   berry.vy += 0.42*dT*60;
-  berry.rot += berry.vx*0.05*dT*60;
 
-  // Gentle homing toward catcher
-  const dx=catcher.x-berry.x;
-  if(Math.abs(dx)<160) berry.vx+=dx*0.009*dT*60;
+  // Falls straight down from where it peeled off — x stays fixed
+  berry.y+=berry.vy*dT*60;
 
-  berry.x+=berry.vx*dT*60; berry.y+=berry.vy*dT*60;
-
-  if(inp.pressed && inp.y>VH*0.58){
-    catcher.x+=(inp.x-catcher.x)*0.42;
-    catcher.x=Math.max(catcher.w/2+8, Math.min(VW-catcher.w/2-8, catcher.x));
-  }
+  // Catcher keeps sweeping — the player must have timed the drop
+  moveCatcher();
 
   // Recovery
   berry.sx+=(1-berry.sx)*Math.min(1,dT*5); berry.sy+=(1-berry.sy)*Math.min(1,dT*5);
@@ -1556,7 +1652,11 @@ function doLanding() {
   else if(dx < catcher.hw/2+45) type = 'boop';
   else                           type = 'miss';
 
-  state=S.LANDING; celeb.type=type;
+  // Streak: a clean catch (into the catcher) extends it; a boop or miss resets it
+  const caught = (type === 'pillow' || type === 'basket' || type === 'teddy');
+  if (caught) { streak++; streakPop = 0.6; } else { streak = 0; }
+
+  state=S.LANDING; celeb.type=type; celeb.landT=T;
   berry.sx=1.42; berry.sy=0.62; berry.vx=0; berry.vy=0; berry.rot=0;
 
   if(type==='miss'){
@@ -1581,7 +1681,7 @@ function doLanding() {
 function drawFalling() {
   drawBG();
   drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,berry.rot,0,'strawberry_falling');
-  drawCatcher(); updateDrawParticles(); audioControls();
+  drawCatcher(); updateDrawParticles(); drawStreak(); audioControls();
 }
 
 // ─────────────────────────────────────────────
@@ -1594,8 +1694,10 @@ function updateLanding() {
 
 function drawLanding() {
   drawBG(); drawCatcher();
-  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,0,0.45,'strawberry_caught');
-  updateDrawParticles(); audioControls();
+  // Briefly show the squished tap graphic on impact, then the caught graphic
+  const key = (T - celeb.landT) < 0.18 ? 'strawberry_tap' : 'strawberry_caught';
+  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,0,0.45,key);
+  updateDrawParticles(); drawStreak(); audioControls();
 }
 
 // ─────────────────────────────────────────────
@@ -1603,12 +1705,12 @@ function drawLanding() {
 // ─────────────────────────────────────────────
 function celebMsg(t) {
   return {
-    pillow:  '🎉 Soft landing! Yay!',
-    basket:  '🎊 In the basket! Hooray!',
-    teddy:   '🤗 Teddy hug! So sweet!',
-    boop:    '⭐ Boop! Hee hee hee!',
-    miss:    '😴 Sweet dreams, strawberry!',
-  }[t]||'🎉 Wonderful!';
+    pillow:  'Soft landing! Yay!',
+    basket:  'In the basket! Hooray!',
+    teddy:   'Teddy hug! So sweet!',
+    boop:    'Boop! Hee hee hee!',
+    miss:    'Sweet dreams, strawberry!',
+  }[t]||'Wonderful!';
 }
 
 function updateCelebration() {
@@ -1626,18 +1728,12 @@ function drawCelebration() {
   updateDrawParticles();
 
   if(celeb.showBtns){
-    // Message bubble
-    ctx.save();
-    ctx.fillStyle='rgba(45,27,78,0.88)';
-    rr(VW*0.08,VH*0.38,VW*0.84,72,22); ctx.fill();
-    ctx.fillStyle='#fff'; ctx.font=F(21);
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.fillText(celebMsg(celeb.type),VW/2,VH*0.38+36);
-    ctx.restore();
+    outlineText(celebMsg(celeb.type), VW/2, VH*0.40, 24);
 
-    btn(VW/2-72,VH*0.56,124,62,'🍓 Again',C.red,'#fff','again');
-    btn(VW/2+72,VH*0.56,124,62,'🌙 Bed',C.nightBg2,'#fff','bedtime');
+    imgBtn('btn_again',  VW/2-72,VH*0.56,132,'again');
+    imgBtn('btn_bedtime',VW/2+72,VH*0.56,132,'bedtime');
   }
+  drawStreak();
   audioControls();
 }
 
@@ -1646,6 +1742,7 @@ function drawCelebration() {
 // ─────────────────────────────────────────────
 function startBedtime() {
   state=S.BEDTIME;
+  streak=0;                  // fresh start after the lullaby ending
   bed.dim=0; bed.going=true;
   berry.face={eo:0.12,sm:0.55};
   berry.x=VW/2; berry.y=VH-96; berry.rot=0.1;
@@ -1693,11 +1790,11 @@ function drawBedtime() {
   if(bed.dim>0.52){
     const a=Math.min(1,(bed.dim-0.52)/0.3);
     ctx.save(); ctx.globalAlpha=a;
-    ctx.fillStyle='#fff'; ctx.font=F(34);
-    ctx.textAlign='center'; ctx.textBaseline='middle';
-    ctx.shadowBlur=18; ctx.shadowColor=C.lavender;
-    ctx.fillText('Goodnight,',VW/2,VH*0.22);
-    ctx.fillText('Sticky Strawberry 🍓',VW/2,VH*0.30);
+    outlineText('Goodnight,',VW/2,VH*0.22,34);
+    const t='Sticky Strawberry';
+    outlineText(t,VW/2,VH*0.30,34);
+    ctx.font=F(34);
+    drawBerryIcon(VW/2 + ctx.measureText(t).width/2 + 22, VH*0.30, 15);
     ctx.restore();
   }
 
@@ -1763,7 +1860,7 @@ function drawBedtime() {
   // Replay button
   if(bed.dim>0.72){
     const a=Math.min(1,(bed.dim-0.72)/0.16);
-    btn(VW/2,VH*0.76,124,62,'🍓 Again',C.red,'#fff','replay',a);
+    imgBtn('btn_again',VW/2,VH*0.76,150,'replay',a);
   }
   audioControls();
 }
@@ -1776,13 +1873,7 @@ function drawSingAlong() {
   const line=LYRICS[sing.line]; if(!line) return;
   const p=0.82+0.18*Math.sin(T*4);
   ctx.save(); ctx.globalAlpha=p;
-  ctx.font=F(20); ctx.textAlign='center';
-  const tw=ctx.measureText(line).width;
-  const pw=Math.min(VW-36,tw+44);
-  ctx.fillStyle='rgba(45,27,78,0.9)';
-  rr(VW/2-pw/2,VH*0.725,pw,54,27); ctx.fill();
-  ctx.fillStyle='#fff'; ctx.textBaseline='middle';
-  ctx.fillText(line,VW/2,VH*0.725+27);
+  outlineText(line, VW/2, VH*0.725+27, 20);
   ctx.restore();
 }
 

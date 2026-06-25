@@ -1,7 +1,7 @@
 // Sticky Strawberry — Service Worker
 // Caches all game assets on install so the game works offline.
 
-const CACHE = 'sticky-strawberry-v2';
+const CACHE = 'sticky-strawberry-v3';
 
 const PRECACHE = [
   './',
