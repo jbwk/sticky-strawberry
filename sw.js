@@ -1,24 +1,15 @@
 // Sticky Strawberry — Service Worker
 // Caches all game assets on install so the game works offline.
 
-const CACHE = 'sticky-strawberry-v3';
+const CACHE = 'sticky-strawberry-v5';
 
 const PRECACHE = [
   './',
   './index.html',
   './manifest.json',
-  // Audio files (will be cached if present)
+  './assets/images/icon.png',
+  // Only the song is a file now — sound effects are synthesized at runtime
   './assets/audio/full_song.mp3',
-  './assets/audio/instrumental_loop.mp3',
-  './assets/audio/tap_squish.mp3',
-  './assets/audio/sticky_peel.mp3',
-  './assets/audio/falling_whistle.mp3',
-  './assets/audio/pillow_bounce.mp3',
-  './assets/audio/basket_pop.mp3',
-  './assets/audio/teddy_hug.mp3',
-  './assets/audio/head_boop.mp3',
-  './assets/audio/giggle.mp3',
-  './assets/audio/bedtime_chime.mp3',
 ];
 
 self.addEventListener('install', e => {

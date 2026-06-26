@@ -64,24 +64,18 @@ and draw them with `ctx.drawImage()` inside the relevant draw functions.
 
 ---
 
-## Adding audio
+## Audio
 
-Drop `.mp3` files into `assets/audio/` matching these names:
+The only audio file is the background song:
 
 | Filename | When it plays |
 |---|---|
-| `full_song.mp3` | Sing-along mode |
-| `instrumental_loop.mp3` | Background loop |
-| `lyric_line_01.mp3` – `lyric_line_08.mp3` | One per lyric line |
-| `tap_squish.mp3` | Each tap on the strawberry |
-| `sticky_peel.mp3` | Final tap before falling |
-| `falling_whistle.mp3` | Strawberry in free-fall |
-| `pillow_bounce.mp3` | Caught on pillow |
-| `basket_pop.mp3` | Caught in basket |
-| `teddy_hug.mp3` | Caught by teddy |
-| `head_boop.mp3` | Near-miss boop |
-| `giggle.mp3` | Misses onto bed |
-| `bedtime_chime.mp3` | Bedtime ending |
+| `full_song.mp3` | Loops throughout the game (starts on first interaction) |
+
+All **sound effects are synthesized at runtime** with the Web Audio API — no
+files required. They live in the `sfx()` function in `index.html` (tap, sticky
+peel, falling whistle, pillow/basket/teddy catches, head boop, giggle, bedtime
+chime). Tweak the `tone()` / `noise()` parameters there to change how they sound.
 
 Audio only starts after the first user interaction (required by mobile browsers).
 The sound toggle is remembered in `localStorage`.

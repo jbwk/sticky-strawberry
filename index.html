@@ -5,8 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sticky Strawberry">
 <meta name="theme-color" content="#1a0a2e">
 <title>Sticky Strawberry</title>
+<link rel="apple-touch-icon" href="assets/images/icon.png">
+<link rel="icon" href="assets/images/icon.png">
 <link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -160,9 +163,9 @@ function onStart(cx, cy) {
   inp.pressed = true; inp.x = v.x; inp.y = v.y;
   audioUnlock();
   if (state === S.TITLE) startMusic();
-  if (state === S.TITLE) {
-    // Check if grabbing the berry (generous radius for small fingers)
-    const bp = titleBerryPos();
+  // The berry is grabbable/throwable on the title screen and after a catch (celebration)
+  if (state === S.TITLE || state === S.CELEBRATION) {
+    const bp = (state === S.CELEBRATION) ? { x: berry.x, y: berry.y } : titleBerryPos();
     if (Math.hypot(v.x - bp.x, v.y - bp.y) < berry.r * 1.8) {
       titleDrag = true;
       velHist = [{ x: v.x, y: v.y, t: performance.now() }];
@@ -184,7 +187,7 @@ function onMove(cx, cy) {
 }
 function onEnd() {
   inp.pressed = false;
-  if (titleDrag && state === S.TITLE) {
+  if (titleDrag && (state === S.TITLE || state === S.CELEBRATION)) {
     titleDrag = false;
     // Measure the release swipe (last ~90ms of movement)
     const now = performance.now();
@@ -198,7 +201,7 @@ function onEnd() {
         rvy = (l.y - f.y) / dt;   // negative = upward
       }
     }
-    const last = velHist[velHist.length - 1] || titleBerryPos();
+    const last = velHist[velHist.length - 1] || { x: berry.x, y: berry.y };
     if (rvy <= -THROW_MIN) {
       // Genuine upward swipe → throw with its real strength.
       // Weak throws won't reach the ceiling and will fall back for another try.
@@ -237,16 +240,15 @@ let musicVol = parseFloat(localStorage.getItem('musicVol') ?? '0.7');
 let musicStarted = false;
 let audioReady = false;
 const audioEl = {};
+let actx = null;   // Web Audio context for synthesized sound effects
 
 function audioUnlock() {
   if (audioReady) return;
   audioReady = true;
   try {
-    const ac = new (window.AudioContext || window.webkitAudioContext)();
-    const buf = ac.createBuffer(1,1,22050);
-    const src = ac.createBufferSource();
-    src.buffer = buf; src.connect(ac.destination); src.start(); ac.close();
-  } catch(e) {}
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+  } catch(e) { actx = null; }
 }
 
 function loadAudio(key) {
@@ -258,13 +260,77 @@ function loadAudio(key) {
   audioEl[key] = el;
 }
 
-function play(key, loop = false, vol = 0.525) {
-  if (!soundOn || !audioReady) return;
-  const el = audioEl[key];
-  if (!el) return;
-  el.loop = loop; el.volume = vol;
-  el.currentTime = 0;
-  el.play().catch(() => {});
+// ── Synthesized sound effects (lightweight, no files) ──
+function tone({freq, freq2, dur=0.15, type='sine', vol=0.25, delay=0, attack=0.006}) {
+  if (!actx || !soundOn) return;
+  const t0 = actx.currentTime + delay;
+  const osc = actx.createOscillator();
+  const g = actx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t0);
+  if (freq2) osc.frequency.exponentialRampToValueAtTime(Math.max(1, freq2), t0 + dur);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g).connect(actx.destination);
+  osc.start(t0); osc.stop(t0 + dur + 0.03);
+}
+
+function noise({dur=0.15, vol=0.15, delay=0, hp=0, lp=0}) {
+  if (!actx || !soundOn) return;
+  const t0 = actx.currentTime + delay;
+  const n = Math.floor(actx.sampleRate * dur);
+  const buf = actx.createBuffer(1, n, actx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const g = actx.createGain();
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  let head = src;
+  if (hp || lp) {
+    const f = actx.createBiquadFilter();
+    f.type = hp ? 'highpass' : 'lowpass';
+    f.frequency.value = hp || lp;
+    src.connect(f); head = f;
+  }
+  head.connect(g).connect(actx.destination);
+  src.start(t0); src.stop(t0 + dur + 0.02);
+}
+
+function sfx(key) {
+  switch (key) {
+    case 'tap_squish':      tone({freq:470, freq2:230, dur:0.11, type:'sine',     vol:0.42});
+                            tone({freq:240, freq2:140, dur:0.11, type:'triangle', vol:0.20}); break;
+    case 'sticky_peel':     tone({freq:190, freq2:640, dur:0.28, type:'sawtooth', vol:0.30});
+                            noise({dur:0.24, vol:0.12, hp:1200}); break;
+    case 'falling_whistle': // dramatic descending whistle — two layered sweeps + a tail
+                            tone({freq:1500, freq2:140, dur:0.75, type:'sine',     vol:0.5 });
+                            tone({freq:750,  freq2:90,  dur:0.75, type:'triangle', vol:0.22});
+                            tone({freq:2250, freq2:210, dur:0.5,  type:'sine',     vol:0.12, delay:0.04}); break;
+    case 'pillow_bounce':   tone({freq:180, freq2:80,  dur:0.24, type:'sine',     vol:0.5 });
+                            tone({freq:360, freq2:160, dur:0.12, type:'triangle', vol:0.18}); break;
+    case 'basket_pop':      tone({freq:720, freq2:400, dur:0.1,  type:'square',   vol:0.32});
+                            noise({dur:0.06, vol:0.16, hp:2000}); break;
+    case 'teddy_hug':       tone({freq:330, dur:0.34, type:'sine', vol:0.30});
+                            tone({freq:415, dur:0.34, type:'sine', vol:0.24, delay:0.03});
+                            tone({freq:494, dur:0.34, type:'sine', vol:0.18, delay:0.06}); break;
+    case 'head_boop':       tone({freq:560, freq2:150, dur:0.16, type:'sine',     vol:0.55});
+                            tone({freq:280, freq2:90,  dur:0.16, type:'square',   vol:0.16}); break;
+    case 'giggle':          [0,0.09,0.18,0.27].forEach((d,i)=>
+                              tone({freq:520+i*55, freq2:660+i*55, dur:0.09, type:'triangle', vol:0.26, delay:d})); break;
+    case 'bedtime_chime':   [784,659,523].forEach((f,i)=>   // descending — "game over"
+                              tone({freq:f, dur:0.7, type:'sine', vol:0.26, delay:i*0.16})); break;
+    case 'catch_chime':     [523,659,784,1047].forEach((f,i)=>  // ascending — happy catch
+                              tone({freq:f, dur:0.32, type:'triangle', vol:0.24, delay:i*0.07})); break;
+    case 'record_fanfare':  [784,988,1175,1568].forEach((f,i)=> // bright high run — new high score
+                              tone({freq:f, dur:0.4, type:'triangle', vol:0.26, delay:0.1+i*0.08})); break;
+  }
+}
+
+function play(key) {
+  if (key === 'song') return;   // the song is driven by startMusic()
+  sfx(key);
 }
 
 function stop(key) {
@@ -288,6 +354,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     Object.values(audioEl).forEach(e => { if (!e.paused) { e._was = true; e.pause(); } });
   } else if (soundOn) {
+    if (actx && actx.state === 'suspended') actx.resume();
     Object.values(audioEl).forEach(e => { if (e._was) { e.play().catch(()=>{}); e._was = false; } });
   }
 });
@@ -302,8 +369,8 @@ function startMusic() {
   el.play().catch(() => {});
 }
 
-// Preload all sounds including the background song
-['song','tap_squish','sticky_peel','falling_whistle','pillow_bounce','basket_pop','teddy_hug','head_boop','giggle','bedtime_chime'].forEach(loadAudio);
+// Preload the background song (sound effects are synthesized, no files needed)
+loadAudio('song');
 
 // ─────────────────────────────────────────────
 // BACKGROUND IMAGE
@@ -419,7 +486,7 @@ const berry = {
 
 const catcher = {
   x: VW/2, y: 720,
-  w: 132, hw: 96,                   // travel-clamp width / catch tolerance width
+  w: 132, hw: 100,                  // travel-clamp width / catch tolerance (≈ visible catcher width)
   h: 40, type:'pillow',
   vx: CATCHER_SPEED,                // sideways velocity (auto-sweep)
   bounce:0, hug:false,
@@ -449,6 +516,8 @@ let T = 0, dT = 0, lastTs = 0, round = 0;
 
 // Catch streak (consecutive clean catches)
 let streak = 0, streakPop = 0;
+let bestStreak = parseInt(localStorage.getItem('bestStreak') || '0', 10);
+let recordBeaten = false;   // true once this run has broken the previous best
 
 // ─────────────────────────────────────────────
 // INIT / ROUND SETUP
@@ -1011,9 +1080,9 @@ function drawGooStrand(x1, y1, x2, y2, w1, w2) {
 // Draw rects for each catcher type (in translated context where 0,0 = catcher anchor)
 // Anchor is the centre of the catch surface — berry lands at y = -catcher.h/2
 const CATCHER_RECTS = {
-  pillow:   { key:'pillow',    x:-70, y:-35, w:140, h:70  },
-  basket:   { key:'basket',    x:-70, y:-48, w:140, h:98  },
-  teddy:    { key:'teddybear', x:-63, y:-79, w:126, h:119 },
+  pillow:   { key:'pillow',    x:-50, y:-22, w:100, h:50 },
+  basket:   { key:'basket',    x:-50, y:-37, w:100, h:72 },
+  teddy:    { key:'teddybear', x:-50, y:-27, w:100, h:55 },
 };
 
 // Auto-sweep the catcher side to side, bouncing off the play-area edges
@@ -1443,10 +1512,26 @@ function updateThrow() {
       title.ttime  = 0;
       play('tap_squish');
       spawnJuice(title.tx, title.ty + berry.r);
-    } else if (title.tvy > 0 && title.ty >= title.startY) {
-      // Too weak — fell back down without sticking; return to title to try again
-      state = S.TITLE;
+    } else if (title.ty >= VH - 110) {
+      // Too weak to reach the ceiling — fell onto the bed: a missed throw (game over)
+      title.ty     = VH - 110;
+      title.tx     = Math.max(55, Math.min(VW - 55, title.tx));
+      title.tphase = 'missed';
+      title.ttime  = 0;
+      title.tsx = 1.42; title.tsy = 0.62;   // splat on the bed
+      // Carry the splat position onto the berry so bedtime continues from the same spot
+      berry.x = title.tx; berry.y = title.ty;
+      berry.sx = title.tsx; berry.sy = title.tsy; berry.rot = 0;
+      streak = 0;
+      play('giggle');
+      spawnJuice(title.tx, title.ty + berry.r*0.4);
     }
+
+  } else if (title.tphase === 'missed') {
+    // Settle the splat, hold briefly, then drop into the bedtime / play-again screen
+    title.tsx += (1 - title.tsx) * Math.min(1, dT*5);
+    title.tsy += (1 - title.tsy) * Math.min(1, dT*5);
+    if (title.ttime >= 1.2) startBedtime();
 
   } else if (title.tphase === 'squash') {
     // Damped spring: wide squash → brief stretch → settle
@@ -1460,7 +1545,8 @@ function updateThrow() {
 
 function drawThrow() {
   drawBG();
-  drawBerryPng(title.tx, title.ty, title.tsx, title.tsy, title.trot, 0, 'strawberry_ceiling');
+  const key = title.tphase === 'missed' ? 'strawberry_tap' : 'strawberry_ceiling';
+  drawBerryPng(title.tx, title.ty, title.tsx, title.tsy, title.trot, 0, key);
   updateDrawParticles();
   audioControls();
 }
@@ -1497,6 +1583,19 @@ function drawTitle() {
     ctx.fillText('When will you fall down?', VW/2, VH*0.295);
   }
 
+  // Best streak (high score)
+  if (bestStreak > 0) {
+    ctx.save();
+    ctx.globalAlpha = title.alpha;
+    ctx.font = F(20);
+    const label = 'Best  ×' + bestStreak;
+    const tw = ctx.measureText(label).width;
+    const startX = VW/2 - (tw + 28) / 2;
+    drawBerryIcon(startX + 11, VH*0.375, 12);
+    outlineText(label, startX + 30, VH*0.375, 20, 'left');
+    ctx.restore();
+  }
+
   // Berry position: follows finger while dragging, else gentle float
   let bx, by, bsx = 1, bsy = 1;
   if (titleDrag && inp.pressed) {
@@ -1529,6 +1628,11 @@ function drawTitle() {
 
   drawBerryPng(bx, by, bsx, bsy, wr, 0, titleDrag ? 'strawberry_ceiling' : 'strawberry_title');
 
+  // Credits — fade in/out with the rest of the title (inherits title.alpha)
+  outlineText('Game by Joe Bahar', VW/2, VH*0.905, 14);
+  outlineText('Song by Maddie Bahar', VW/2, VH*0.94, 14);
+
+  drawStreak();
   audioControls();
   ctx.restore();
 }
@@ -1619,7 +1723,8 @@ function drawPlaying() {
   if(round===1 && berry.taps===0){
     const p=0.55+0.45*Math.sin(T*4);
     ctx.save(); ctx.globalAlpha=p;
-    outlineText('Tap the strawberry!',VW/2,VH*0.34,21);
+    outlineText('Tap the strawberry',VW/2,VH*0.32,21);
+    outlineText('and catch it below!',VW/2,VH*0.37,21);
     ctx.restore();
   }
   drawStreak();
@@ -1652,30 +1757,60 @@ function doLanding() {
   else if(dx < catcher.hw/2+45) type = 'boop';
   else                           type = 'miss';
 
-  // Streak: a clean catch (into the catcher) extends it; a boop or miss resets it
+  // Streak: a clean catch extends it; anything else ends the run
   const caught = (type === 'pillow' || type === 'basket' || type === 'teddy');
-  if (caught) { streak++; streakPop = 0.6; } else { streak = 0; }
-
-  state=S.LANDING; celeb.type=type; celeb.landT=T;
-  berry.sx=1.42; berry.sy=0.62; berry.vx=0; berry.vy=0; berry.rot=0;
-
-  if(type==='miss'){
-    berry.y=VH-102; berry.x=Math.max(55,Math.min(VW-55,berry.x));
+  celeb.record = false;
+  if (caught) {
+    streak++; streakPop = 0.6;
+    if (streak > bestStreak) {
+      const hadRecord = bestStreak > 0;
+      bestStreak = streak;
+      localStorage.setItem('bestStreak', bestStreak);
+      // Celebrate the moment a real previous best is first beaten this run
+      if (hadRecord && !recordBeaten) { recordBeaten = true; celeb.record = true; }
+    }
   } else {
-    berry.y=catcher.y-catcher.h/2-berry.r*0.75; berry.x=catcher.x;
+    streak = 0; recordBeaten = false;
   }
 
-  catcher.bounce=Math.PI;
-  if(type==='teddy') catcher.hug=true;
+  state=S.LANDING; celeb.type=type; celeb.landT=T;
+  berry.vx=0; berry.vy=0; berry.rot=0;
+
+  if (caught) {
+    berry.sx=1.42; berry.sy=0.62;
+    berry.restY = catcher.y-catcher.h/2-berry.r*0.75;   // settled celebration height
+    berry.y = berry.restY; berry.x = catcher.x;
+    catcher.bounce=Math.PI;
+    if(type==='teddy') catcher.hug=true;
+    spawnConfetti(berry.x,berry.y,26);
+  } else if (type==='boop') {
+    // Grazed the edge → flip off the side so it's clearly a miss
+    berry.sx=1; berry.sy=1;
+    berry.y = catcher.y - catcher.h/2 - berry.r*0.5;
+    const dir = (berry.x >= catcher.x) ? 1 : -1;
+    berry.x = catcher.x + dir * (catcher.hw/2);
+    berry.vx = dir * 6;
+    berry.vy = -3.5;
+    catcher.bounce = Math.PI*0.6;
+    spawnJuice(berry.x, berry.y);
+  } else { // miss — straight onto the floor
+    berry.sx=1.42; berry.sy=0.62;
+    berry.y=VH-102; berry.x=Math.max(55,Math.min(VW-55,berry.x));
+    spawnJuice(berry.x, berry.y-10);
+  }
 
   const snd={pillow:'pillow_bounce',basket:'basket_pop',teddy:'teddy_hug',boop:'head_boop',miss:'giggle'};
   play(snd[type]||'giggle');
-  spawnConfetti(berry.x,berry.y,26);
-  if(type==='boop') spawnStars(berry.x, berry.y-45);
-  berry.face.sm=1.38;
+  if (caught) play('catch_chime');   // happy ascending chime layered on the catch
+  if (celeb.record) { play('record_fanfare'); spawnConfetti(VW/2, VH*0.34, 40); }
 
-  if(type==='miss') setTimeout(()=>{ berry.face.eo=0.12; berry.face.sm=0.52; },900);
-  setTimeout(()=>{ state=S.CELEBRATION; setTimeout(()=>{ celeb.showBtns=true; },900); },1300);
+  if (caught) {
+    // Celebration screen persists — the player grabs the berry and throws again to continue
+    setTimeout(()=>{ state=S.CELEBRATION; }, 900);
+  } else {
+    // Missed — game over: drop into the bedtime / play-again screen
+    setTimeout(()=>{ startBedtime(); }, 1300);
+  }
 }
 
 function drawFalling() {
@@ -1688,15 +1823,35 @@ function drawFalling() {
 // LANDING (brief transition)
 // ─────────────────────────────────────────────
 function updateLanding() {
+  if (celeb.type === 'boop') {
+    // Tumble off the side of the catcher
+    berry.vy += 0.5*dT*60;
+    berry.x  += berry.vx*dT*60;
+    berry.y  += berry.vy*dT*60;
+    berry.rot += berry.vx*0.03*dT*60;
+    catcher.bounce=Math.max(0,catcher.bounce-dT*5);
+    return;
+  }
   berry.sx+=(1-berry.sx)*Math.min(1,dT*4.5); berry.sy+=(1-berry.sy)*Math.min(1,dT*4.5);
   catcher.bounce=Math.max(0,catcher.bounce-dT*5);
+
+  // Clean catch: plunge a little deeper into the catcher, then spring back up to rest
+  const caught = (celeb.type==='pillow'||celeb.type==='basket'||celeb.type==='teddy');
+  if (caught && berry.restY !== undefined) {
+    const p = Math.min(1, (T - celeb.landT) / 0.5);
+    const decay = 1 - p;
+    berry.y = berry.restY + 20 * decay * Math.sin(p * Math.PI * 2);   // dip down, then rebound
+  }
 }
 
 function drawLanding() {
   drawBG(); drawCatcher();
-  // Briefly show the squished tap graphic on impact, then the caught graphic
-  const key = (T - celeb.landT) < 0.18 ? 'strawberry_tap' : 'strawberry_caught';
-  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,0,0.45,key);
+  const caught = (celeb.type==='pillow'||celeb.type==='basket'||celeb.type==='teddy');
+  // Win → celebration graphic (brief squish on impact first); lose → squished tap graphic
+  let key;
+  if (caught) key = (T - celeb.landT) < 0.18 ? 'strawberry_tap' : 'strawberry_celebration';
+  else        key = 'strawberry_tap';
+  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,berry.rot, caught?0.45:0, key);
   updateDrawParticles(); drawStreak(); audioControls();
 }
 
@@ -1716,23 +1871,48 @@ function celebMsg(t) {
 function updateCelebration() {
   berry.sx+=(1-berry.sx)*Math.min(1,dT*3); berry.sy+=(1-berry.sy)*Math.min(1,dT*3);
   catcher.bounce=Math.max(0,catcher.bounce-dT*3);
-  if(celeb.type==='miss'){
-    const by=VH-130+Math.sin(T*1.4)*3;
-    berry.y+=(by-berry.y)*dT*2;
-  }
 }
 
 function drawCelebration() {
   drawBG(); drawCatcher();
-  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,0, 0.28+0.18*Math.sin(T*3), celeb.type==='miss'?'strawberry_caught':'strawberry_celebration');
+
+  // Berry stays where it was caught; follows the finger while being grabbed to throw again
+  let bx, by, bsx = berry.sx, bsy = berry.sy;
+  if (titleDrag && inp.pressed) { bx = inp.x; by = inp.y; bsx = 1.12; bsy = 0.88; }
+  else { bx = berry.x; by = berry.y; }
+
+  // Tap pulse
+  if (title.pulse > 0) {
+    title.pulse = Math.max(0, title.pulse - dT);
+    const s = 1 + Math.sin((1 - title.pulse / PULSE_DUR) * Math.PI) * 0.16;
+    bsx *= s; bsy *= s;
+  }
+
+  drawBerryPng(bx, by, bsx, bsy, 0, 0.28+0.18*Math.sin(T*3), 'strawberry_celebration');
   updateDrawParticles();
 
-  if(celeb.showBtns){
-    outlineText(celebMsg(celeb.type), VW/2, VH*0.40, 24);
-
-    imgBtn('btn_again',  VW/2-72,VH*0.56,132,'again');
-    imgBtn('btn_bedtime',VW/2+72,VH*0.56,132,'bedtime');
+  // New-high-score banner (pulses) sits above the catch message
+  if (celeb.record) {
+    const s = 1 + Math.sin(T * 6) * 0.07;
+    ctx.save();
+    ctx.translate(VW/2, VH*0.32); ctx.scale(s, s);
+    outlineText('NEW HIGH SCORE!', 0, 0, 26, 'center', C.yellow, C.darkRed);
+    ctx.restore();
   }
+
+  outlineText(celebMsg(celeb.type), VW/2, VH*0.40, 24);
+
+  // "Throw again" hint on the berry (hidden while being grabbed)
+  if (!titleDrag) {
+    const arrowY = by - berry.r - 30 + Math.sin(T * 3.5) * 8;
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    drawArrowUp(bx, arrowY, 13);
+    ctx.globalAlpha = 0.6 + 0.4 * Math.sin(T * 2.2);
+    outlineText('Throw again!', bx, by + berry.r + 28, 18);
+    ctx.restore();
+  }
+
   drawStreak();
   audioControls();
 }
@@ -1742,11 +1922,13 @@ function drawCelebration() {
 // ─────────────────────────────────────────────
 function startBedtime() {
   state=S.BEDTIME;
-  streak=0;                  // fresh start after the lullaby ending
+  streak=0; recordBeaten=false;   // fresh start after the lullaby ending
   bed.dim=0; bed.going=true;
   berry.face={eo:0.12,sm:0.55};
-  berry.x=VW/2; berry.y=VH-96; berry.rot=0.1;
-  berry.sx=1; berry.sy=1;
+  // Keep the strawberry where it landed — just settle it upright and on-screen
+  berry.x = Math.max(45, Math.min(VW-45, berry.x));
+  berry.y = Math.min(VH-92, Math.max(VH-170, berry.y));
+  berry.rot=0; berry.sx=1; berry.sy=1;
   play('bedtime_chime');
 }
 
@@ -1761,16 +1943,10 @@ function updateBedtime() {
 
 function drawBedtime() {
   drawBG();
-  // Tiny blanket over berry
-  ctx.save();
-  ctx.fillStyle=C.lavender;
-  rr(berry.x-56,berry.y+10,112,32,16); ctx.fill();
-  ctx.fillStyle='rgba(255,255,255,0.18)';
-  rr(berry.x-56,berry.y+10,112,13,16); ctx.fill();
-  ctx.restore();
+  drawCatcher();   // keep the catcher where it was while the room dims
 
-  const breathe=Math.sin(T*1.2)*0.02;
-  drawBerryPng(berry.x,berry.y,1+breathe,1-breathe,0.1,0,'strawberry_bedtime');
+  // Keep the strawberry as it landed while the room dims
+  drawBerryPng(berry.x,berry.y,berry.sx,berry.sy,berry.rot,0,'strawberry_tap');
   updateDrawParticles();
 
   // Dim overlay
@@ -1909,7 +2085,6 @@ function loop(ts) {
 // BOOT
 // ─────────────────────────────────────────────
 initStars();
-Object.keys(ASSETS.audio).forEach(loadAudio);
 requestAnimationFrame(ts => { lastTs=ts; requestAnimationFrame(loop); });
 
 // ─────────────────────────────────────────────
